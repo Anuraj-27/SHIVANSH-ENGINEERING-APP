@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+@theme {
+  /* Core Palette Tokens */
+  --color-canvas: #F5F1E9;
+  --color-ink: #29434F;
+  --color-ink-hover: #1E333D;
+  --color-sage: #668C78;
+  --color-terracotta: #C97854;
+  --color-ivory: #FFFCF6;
+  --color-border: #DDD4C6;
+  --color-border-strong: #C5B9A7;
+
+  /* Typography Tokens */
+  --font-display: 'DM Serif Display', Georgia, Cambria, 'Times New Roman', Times, serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    scroll-behavior: smooth;
+  }
+
+  body,
+  input,
+  textarea,
+  button,
+  select,
+  optgroup {
+    font-family: var(--font-sans);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Faint technical background pattern tuned to warm palette with low contrast */
+.blueprint-watermark {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='400' height='400' viewBox='0 0 400 400' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='200' cy='200' r='140' stroke='%2329434F' stroke-width='0.75' stroke-dasharray='4 4'/%3E%3Ccircle cx='200' cy='200' r='110' stroke='%23668C78' stroke-width='0.75'/%3E%3Ccircle cx='200' cy='200' r='70' stroke='%2329434F' stroke-width='0.75'/%3E%3Ccircle cx='200' cy='200' r='30' stroke='%23668C78' stroke-width='0.75'/%3E%3Cpath d='M200 40V360M40 200H360M87 87L313 313M87 313L313 87' stroke='%2329434F' stroke-width='0.5' stroke-dasharray='2 2'/%3E%3Cpath d='M195 55h10v12h-10zM195 333h10v12h-10zM55 195h12v10H55zM333 195h12v10h-12z' fill='%2329434F'/%3E%3Cpath d='M97 103l7-7 8.5 8.5-7 7zM287 293l7-7 8.5 8.5-7 7zM103 297l-7-7 8.5-8.5 7 7zM293 107l-7-7 8.5-8.5 7 7z' fill='%2329434F'/%3E%3Cpath d='M20 20h20M20 20v20M380 20h-20M380 20v20M20 380h20M20 380v-20M380 380h-20M380 380v-20' stroke='%23668C78' stroke-width='0.75'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 320px 320px;
+  opacity: 0.035;
+}
+
+/* Subtle warm minimal shadows */
+.shadow-soft-diffused {
+  box-shadow: 0 2px 10px -2px rgba(41, 67, 79, 0.05);
+}
+
+.shadow-card-elevated {
+  box-shadow: 0 6px 18px -4px rgba(41, 67, 79, 0.08);
+}
+
+@keyframes progress {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
