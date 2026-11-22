@@ -1,5 +1,36 @@
-import React, { useState } from 'react';
-import { MapPin, Phone, Mail, CheckCircle2, Send } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { MapPin, Phone, Mail, CheckCircle2, Send, AlertCircle } from 'lucide-react';
+
+interface TurnstileApi {
+  render: (
+    container: HTMLElement,
+    options: {
+      sitekey: string;
+      callback?: (token: string) => void;
+      'expired-callback'?: () => void;
+      'error-callback'?: () => void;
+      theme?: 'light' | 'dark' | 'auto';
+    }
+  ) => string;
+  reset: (widgetId?: string) => void;
+  remove: (widgetId: string) => void;
+}
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
+
+interface EnquiryResponse {
+  ok?: boolean;
+  error?: string;
+  id?: string;
+}
+
+const BUILD_TURNSTILE_SITE_KEY = (import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim();
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const PHONE_ALLOWED_PATTERN = /^[+\d\s().-]+$/;
 
 export const ContactPage: React.FC = () => {
   const [formData, setFormData] = useState({
@@ -9,13 +40,204 @@ export const ContactPage: React.FC = () => {
     designation: '',
     description: '',
   });
-
+  const [honeypot, setHoneypot] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState<string>(BUILD_TURNSTILE_SITE_KEY);
+  const [turnstileToken, setTurnstileToken] = useState<string>('');
+  const turnstileContainerRef = useRef<HTMLDivElement>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
+
+  // Discover optional public Turnstile site key from Worker runtime config if not provided at build time
+  useEffect(() => {
+    if (BUILD_TURNSTILE_SITE_KEY) return;
+    let active = true;
+    fetch('/api/enquiry/config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { ok?: boolean; turnstileSiteKey?: string | null } | null) => {
+        if (active && data?.ok && typeof data.turnstileSiteKey === 'string' && data.turnstileSiteKey.trim()) {
+          setTurnstileSiteKey(data.turnstileSiteKey.trim());
+        }
+      })
+      .catch(() => {
+        // Optional runtime discovery; ignore when running static Vite preview without Worker
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Load and render Cloudflare Turnstile widget when a public site key is configured
+  useEffect(() => {
+    if (!turnstileSiteKey || submitted) return;
+
+    let cancelled = false;
+
+    const renderWidget = () => {
+      if (cancelled || !turnstileContainerRef.current || !window.turnstile) return;
+      if (turnstileWidgetIdRef.current) {
+        try {
+          window.turnstile.remove(turnstileWidgetIdRef.current);
+        } catch {
+          // Ignore removal errors if widget was already unmounted
+        }
+        turnstileWidgetIdRef.current = null;
+      }
+
+      turnstileWidgetIdRef.current = window.turnstile.render(turnstileContainerRef.current, {
+        sitekey: turnstileSiteKey,
+        theme: 'light',
+        callback: (token: string) => {
+          setTurnstileToken(token);
+          setSubmitError(null);
+        },
+        'expired-callback': () => {
+          setTurnstileToken('');
+        },
+        'error-callback': () => {
+          setTurnstileToken('');
+        },
+      });
+    };
+
+    if (window.turnstile) {
+      renderWidget();
+    } else {
+      const scriptId = 'cf-turnstile-script';
+      let script = document.getElementById(scriptId) as HTMLScriptElement | null;
+      if (!script) {
+        script = document.createElement('script');
+        script.id = scriptId;
+        script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+      }
+      script.addEventListener('load', renderWidget);
+      return () => {
+        cancelled = true;
+        script?.removeEventListener('load', renderWidget);
+        if (turnstileWidgetIdRef.current && window.turnstile) {
+          try {
+            window.turnstile.remove(turnstileWidgetIdRef.current);
+          } catch {
+            // Ignore cleanup errors
+          }
+          turnstileWidgetIdRef.current = null;
+        }
+      };
+    }
+
+    return () => {
+      cancelled = true;
+      if (turnstileWidgetIdRef.current && window.turnstile) {
+        try {
+          window.turnstile.remove(turnstileWidgetIdRef.current);
+        } catch {
+          // Ignore cleanup errors
+        }
+        turnstileWidgetIdRef.current = null;
+      }
+    };
+  }, [turnstileSiteKey, submitted]);
+
+  const resetTurnstile = () => {
+    setTurnstileToken('');
+    if (turnstileWidgetIdRef.current && window.turnstile) {
+      try {
+        window.turnstile.reset(turnstileWidgetIdRef.current);
+      } catch {
+        // Ignore reset errors
+      }
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.mobile || !formData.email || !formData.description) return;
-    setSubmitted(true);
+    setSubmitError(null);
+
+    const name = formData.name.trim();
+    const mobile = formData.mobile.trim();
+    const email = formData.email.trim();
+    const designation = formData.designation.trim();
+    const description = formData.description.trim();
+
+    if (name.length < 2) {
+      setSubmitError('Please enter your full name (at least 2 characters).');
+      return;
+    }
+
+    const digitCount = mobile.replace(/\D/g, '').length;
+    if (mobile.length < 7 || !PHONE_ALLOWED_PATTERN.test(mobile) || digitCount < 7) {
+      setSubmitError('Please enter a valid mobile or phone number.');
+      return;
+    }
+
+    if (!EMAIL_PATTERN.test(email)) {
+      setSubmitError('Please enter a valid email address.');
+      return;
+    }
+
+    if (description.length < 10) {
+      setSubmitError('Please describe your inquiry in detail (at least 10 characters).');
+      return;
+    }
+
+    if (turnstileSiteKey && !turnstileToken) {
+      setSubmitError('Please complete the security verification check before submitting.');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch('/api/enquiry', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name,
+          mobile,
+          email,
+          designation,
+          description,
+          website: honeypot,
+          turnstileToken,
+        }),
+      });
+
+      const data = (await response.json().catch(() => null)) as EnquiryResponse | null;
+
+      if (response.ok && data?.ok === true) {
+        setSubmitted(true);
+        setSubmitError(null);
+        return;
+      }
+
+      if (response.status === 503) {
+        setSubmitError(
+          data?.error ||
+            'Enquiry email service is not configured yet. Your details have been kept below—please try again later or reach us at +91 88888 45711 / shivanshengineering@yahoo.in.'
+        );
+      } else {
+        setSubmitError(
+          data?.error ||
+            'We could not submit your inquiry right now. Your details have been kept below—please try again or contact us directly.'
+        );
+      }
+
+      resetTurnstile();
+    } catch {
+      setSubmitError(
+        'Unable to reach the enquiry service right now. Your details have been kept below—please try again or contact us at +91 88888 45711.'
+      );
+      resetTurnstile();
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -159,6 +381,8 @@ export const ContactPage: React.FC = () => {
                 <button
                   onClick={() => {
                     setSubmitted(false);
+                    setSubmitError(null);
+                    setTurnstileToken('');
                     setFormData({
                       name: '',
                       mobile: '',
@@ -174,7 +398,30 @@ export const ContactPage: React.FC = () => {
               </div>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-6" noValidate>
+              {/* Hidden honeypot field for basic bot filtering */}
+              <div className="sr-only" aria-hidden="true">
+                <label htmlFor="enquiry-website">Website</label>
+                <input
+                  id="enquiry-website"
+                  type="text"
+                  name="website"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  value={honeypot}
+                  onChange={(e) => setHoneypot(e.target.value)}
+                />
+              </div>
+
+              {submitError && (
+                <div
+                  role="alert"
+                  className="p-4 rounded-xl bg-terracotta/12 border border-terracotta text-ink text-sm font-medium flex items-start gap-3"
+                >
+                  <AlertCircle className="w-5 h-5 text-terracotta shrink-0 mt-0.5" />
+                  <span>{submitError}</span>
+                </div>
+              )}
               
               {/* Row 1: Name & Mobile Number */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -185,6 +432,7 @@ export const ContactPage: React.FC = () => {
                   <input
                     type="text"
                     required
+                    maxLength={120}
                     placeholder="Your full name"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -199,6 +447,7 @@ export const ContactPage: React.FC = () => {
                   <input
                     type="tel"
                     required
+                    maxLength={30}
                     placeholder="Your mobile number"
                     value={formData.mobile}
                     onChange={(e) => setFormData({ ...formData, mobile: e.target.value })}
@@ -216,6 +465,7 @@ export const ContactPage: React.FC = () => {
                   <input
                     type="email"
                     required
+                    maxLength={254}
                     placeholder="your.email@example.com"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -229,6 +479,7 @@ export const ContactPage: React.FC = () => {
                   </label>
                   <input
                     type="text"
+                    maxLength={120}
                     placeholder="Your designation"
                     value={formData.designation}
                     onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
@@ -245,6 +496,7 @@ export const ContactPage: React.FC = () => {
                 <textarea
                   required
                   rows={6}
+                  maxLength={5000}
                   placeholder="Please describe your inquiry in detail"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -252,14 +504,22 @@ export const ContactPage: React.FC = () => {
                 />
               </div>
 
+              {/* Optional Cloudflare Turnstile Widget (renders automatically when public site key is configured) */}
+              {turnstileSiteKey && (
+                <div className="pt-1">
+                  <div ref={turnstileContainerRef} />
+                </div>
+              )}
+
               {/* Submit Button */}
               <div className="pt-2">
                 <button
                   type="submit"
-                  className="w-full py-4 px-6 text-base font-semibold text-ivory bg-ink hover:bg-ink-hover rounded-xl transition-colors duration-150 shadow-soft-diffused font-sans flex items-center justify-center gap-2"
+                  disabled={isSubmitting}
+                  className="w-full py-4 px-6 text-base font-semibold text-ivory bg-ink hover:bg-ink-hover disabled:opacity-60 rounded-xl transition-colors duration-150 shadow-soft-diffused font-sans flex items-center justify-center gap-2"
                 >
                   <Send className="w-4 h-4" />
-                  <span>Submit Inquiry</span>
+                  <span>{isSubmitting ? 'Submitting Inquiry...' : 'Submit Inquiry'}</span>
                 </button>
               </div>
 
