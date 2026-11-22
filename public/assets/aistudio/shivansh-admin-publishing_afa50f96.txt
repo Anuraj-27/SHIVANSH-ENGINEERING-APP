@@ -1,0 +1,2482 @@
+Shivansh Engineering admin publishing update. Apply each of the eight file sections to its relative path.
+
+===== FILE: .gitignore =====
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+.dev.vars
+.dev.vars.*
+
+===== END FILE =====
+
+===== FILE: src/components/AdminMediaPublisher.tsx =====
+import { useState, type FormEvent } from 'react';
+import { PROCESSING_LINES } from '../data/processingLinesData';
+import { EQUIPMENTS_LIST } from '../pages/EquipmentsPage';
+import { normalizeMediaSlot } from '../services/publishedMedia';
+
+const inputClass = 'w-full rounded-xl border border-border-strong bg-ivory px-4 py-3 text-ink';
+
+export function AdminMediaPublisher({ onSessionExpired }: { onSessionExpired: () => void }) {
+  const [section, setSection] = useState('gallery');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  async function publish(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    setBusy(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/admin/media', { method: 'POST', body: data });
+      if (response.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        setMessage(result.error || 'Could not publish this image.');
+        return;
+      }
+      form.reset();
+      setMessage('Photo published. Allow up to a minute for the public page to refresh.');
+    } catch {
+      setMessage('Could not confirm publication. Check the public page before retrying.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="mb-8 rounded-2xl border border-border bg-ivory p-6 text-ink">
+      <h2 className="mb-2 font-display text-2xl">Publish a website photo</h2>
+      <p className="mb-5 text-sm">Upload a JPEG, PNG, or WebP image up to 5 MB from your laptop.</p>
+      <form onSubmit={publish}>
+        <fieldset disabled={busy} className="grid gap-4 sm:grid-cols-2">
+          <label>Destination
+            <select name="section" value={section} onChange={(event) => setSection(event.target.value)} className={inputClass}>
+              <option value="gallery">Gallery</option>
+              <option value="homepage_hero">Homepage hero</option>
+              <option value="processing_line">Processing line</option>
+              <option value="equipment">Equipment</option>
+            </select>
+          </label>
+          {section === 'processing_line' && (
+            <label>Processing line
+              <select key={section} name="slot" className={inputClass}>
+                {PROCESSING_LINES.map((line) => <option key={line.slug} value={normalizeMediaSlot(line.slug)}>{line.name}</option>)}
+              </select>
+            </label>
+          )}
+          {section === 'equipment' && (
+            <label>Equipment
+              <select key={section} name="slot" className={inputClass}>
+                {EQUIPMENTS_LIST.map((name) => <option key={name} value={normalizeMediaSlot(name)}>{name}</option>)}
+              </select>
+            </label>
+          )}
+          <label>Title<input name="title" required maxLength={160} className={inputClass} /></label>
+          <label>Alternative text<input name="altText" maxLength={240} className={inputClass} /></label>
+          {section === 'gallery' && (
+            <label>Category
+              <select name="category" className={inputClass}>
+                <option value="processing-line">Processing line</option>
+                <option value="equipment">Equipment</option>
+                <option value="installation">Installation</option>
+              </select>
+            </label>
+          )}
+          <label>Photo<input name="image" type="file" required accept="image/jpeg,image/png,image/webp" className={inputClass} /></label>
+          <button type="submit" className="justify-self-start rounded-xl bg-ink px-5 py-3 text-ivory">
+            {busy ? 'Publishing…' : 'Publish photo'}
+          </button>
+        </fieldset>
+      </form>
+      <p role="status" className="mt-4 text-sm">{message}</p>
+    </section>
+  );
+}
+
+===== END FILE =====
+
+===== FILE: src/pages/AdminPage.tsx =====
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Lock,
+  LogOut,
+  Upload,
+  Image as ImageIcon,
+  CheckCircle2,
+  Trash2,
+  Plus,
+  RefreshCw,
+  ExternalLink,
+  Layers,
+  Cog,
+  AlertCircle,
+  ArrowUp,
+  ArrowDown,
+  Sparkles,
+} from 'lucide-react';
+import { AdminMediaPublisher } from '../components/AdminMediaPublisher';
+import { useRouter } from '../router/Router';
+import {
+  getStoredGallery,
+  saveGallery,
+  getStoredProcessingLinesMedia,
+  saveProcessingLineMedia,
+  getStoredEquipmentsMedia,
+  saveEquipmentMedia,
+  removeEquipmentMedia,
+  getStoredLandingImages,
+  saveLandingImages,
+  processAndCompressImage,
+  GalleryPhoto,
+  LandingShowcaseImage,
+  DEFAULT_GALLERY,
+  DEFAULT_LANDING_IMAGES
+} from '../services/mediaStore';
+import { PROCESSING_LINES } from '../data/processingLinesData';
+import { EQUIPMENTS_LIST } from './EquipmentsPage';
+
+export const AdminPage: React.FC = () => {
+  const { navigate } = useRouter();
+
+  // Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authPending, setAuthPending] = useState(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/admin/session', { cache: 'no-store', signal: controller.signal })
+      .then((response) => setIsAuthenticated(response.ok))
+      .catch(() => undefined)
+      .finally(() => { if (!controller.signal.aborted) setAuthPending(false); });
+    return () => controller.abort();
+  }, []);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+
+  // Active Admin Tab
+  const [activeTab, setActiveTab] = useState<'landing-showcase' | 'gallery' | 'processing-lines' | 'equipments'>('landing-showcase');
+
+  // Media States
+  const [landingImages, setLandingImages] = useState<LandingShowcaseImage[]>(getStoredLandingImages());
+  const [gallery, setGallery] = useState<GalleryPhoto[]>(getStoredGallery());
+  const [processingLinesMedia, setProcessingLinesMedia] = useState(getStoredProcessingLinesMedia());
+  const [equipmentsMedia, setEquipmentsMedia] = useState(getStoredEquipmentsMedia());
+
+  // Upload Feedback
+  const [successMsg, setSuccessMsg] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // Landing Showcase Upload State
+  const [newShowcaseTitle, setNewShowcaseTitle] = useState('');
+  const [newShowcaseUrl, setNewShowcaseUrl] = useState('');
+  const [newShowcasePreview, setNewShowcasePreview] = useState<string | null>(null);
+  const [showcaseInputMode, setShowcaseInputMode] = useState<'upload' | 'url'>('upload');
+  const showcaseFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Gallery Upload Form State
+  const [newGalleryTitle, setNewGalleryTitle] = useState('');
+  const [newGalleryCategory, setNewGalleryCategory] = useState<'processing-line' | 'equipment' | 'installation'>('processing-line');
+  const [newGalleryLocation, setNewGalleryLocation] = useState('Pune Works Unit II');
+  const [newGallerySpeed, setNewGallerySpeed] = useState('Custom Specification');
+  const [newGalleryPreview, setNewGalleryPreview] = useState<string | null>(null);
+  const galleryFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Processing Line Photo Form State
+  const [selectedLineSlug, setSelectedLineSlug] = useState(PROCESSING_LINES[0].slug);
+  const [lineImagePreview, setLineImagePreview] = useState<string | null>(null);
+  const lineFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Equipment Photo Form State
+  const [selectedEquipment, setSelectedEquipment] = useState(EQUIPMENTS_LIST[0]);
+  const [equipmentImagePreview, setEquipmentImagePreview] = useState<string | null>(null);
+  const equipmentFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync state on updates
+  useEffect(() => {
+    const handleSync = () => {
+      setLandingImages(getStoredLandingImages());
+      setGallery(getStoredGallery());
+      setProcessingLinesMedia(getStoredProcessingLinesMedia());
+      setEquipmentsMedia(getStoredEquipmentsMedia());
+    };
+    window.addEventListener('shivansh-media-updated', handleSync);
+    return () => window.removeEventListener('shivansh-media-updated', handleSync);
+  }, []);
+
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (authPending) return;
+    setAuthPending(true);
+    setAuthError('');
+    try {
+      const response = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        setAuthError(data.error || 'Could not sign in.');
+        return;
+      }
+      setPassword('');
+      setIsAuthenticated(true);
+    } catch {
+      setAuthError('Could not reach the admin service.');
+    } finally {
+      setAuthPending(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setAuthError('');
+    try {
+      const response = await fetch('/api/admin/logout', { method: 'POST' });
+      if (!response.ok) throw new Error('Logout failed');
+      setIsAuthenticated(false);
+      setUsername('');
+    } catch {
+      setAuthError('Could not sign out. Please try again.');
+    }
+  };
+
+  const showNotification = (msg: string) => {
+    setSuccessMsg(msg);
+    setTimeout(() => setSuccessMsg(''), 4000);
+  };
+
+  // --- Handlers: Landing Showcase ---
+  const handleShowcaseFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsProcessing(true);
+      const compressed = await processAndCompressImage(file);
+      setNewShowcasePreview(compressed);
+    } catch (err) {
+      console.error(err);
+      alert('Error processing image. Please try another file.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleAddShowcaseImage = (e: React.FormEvent) => {
+    e.preventDefault();
+    const finalImageUrl = showcaseInputMode === 'url' ? newShowcaseUrl.trim() : newShowcasePreview;
+
+    if (!finalImageUrl) {
+      alert('Please select an image file or provide an image URL');
+      return;
+    }
+    if (!newShowcaseTitle.trim()) {
+      alert('Please enter a Heading Title for the showcase slide');
+      return;
+    }
+
+    const newItem: LandingShowcaseImage = {
+      id: `landing-${Date.now()}`,
+      title: newShowcaseTitle.trim().toUpperCase(),
+      imageUrl: finalImageUrl,
+    };
+
+    const updated = [newItem, ...landingImages];
+    setLandingImages(updated);
+    saveLandingImages(updated);
+
+    // Reset Form
+    setNewShowcaseTitle('');
+    setNewShowcaseUrl('');
+    setNewShowcasePreview(null);
+    if (showcaseFileInputRef.current) showcaseFileInputRef.current.value = '';
+    showNotification(`Added "${newItem.title}" to Landing Page Showcase!`);
+  };
+
+  const handleDeleteShowcaseImage = (id: string) => {
+    if (landingImages.length <= 1) {
+      alert('At least one showcase image must remain for the landing page hero.');
+      return;
+    }
+    if (window.confirm('Remove this slide from the landing page showcase?')) {
+      const updated = landingImages.filter((item) => item.id !== id);
+      setLandingImages(updated);
+      saveLandingImages(updated);
+      showNotification('Slide removed from Landing Page Showcase.');
+    }
+  };
+
+  const handleMoveShowcaseImage = (index: number, direction: 'up' | 'down') => {
+    const newIdx = direction === 'up' ? index - 1 : index + 1;
+    if (newIdx < 0 || newIdx >= landingImages.length) return;
+
+    const updated = [...landingImages];
+    const [moved] = updated.splice(index, 1);
+    updated.splice(newIdx, 0, moved);
+
+    setLandingImages(updated);
+    saveLandingImages(updated);
+    showNotification('Showcase slide order updated.');
+  };
+
+  const handleResetShowcaseToDefaults = () => {
+    if (window.confirm('Reset Landing Showcase to factory default images?')) {
+      setLandingImages(DEFAULT_LANDING_IMAGES);
+      saveLandingImages(DEFAULT_LANDING_IMAGES);
+      showNotification('Landing Showcase reset to factory defaults.');
+    }
+  };
+
+  // --- Handlers: Gallery Upload ---
+  const handleGalleryFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsProcessing(true);
+      const compressed = await processAndCompressImage(file);
+      setNewGalleryPreview(compressed);
+    } catch (err) {
+      console.error(err);
+      alert('Error processing image. Please try another file.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleAddGalleryItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newGalleryPreview || !newGalleryTitle) {
+      alert('Please select an image and enter a title');
+      return;
+    }
+
+    const newItem: GalleryPhoto = {
+      id: `gal-${Date.now()}`,
+      title: newGalleryTitle,
+      category: newGalleryCategory,
+      location: newGalleryLocation || 'Pune Works Unit II',
+      speed: newGallerySpeed || 'Standard OEM Rating',
+      imageUrl: newGalleryPreview,
+      uploadedAt: new Date().toISOString().split('T')[0],
+    };
+
+    const updated = [newItem, ...gallery];
+    setGallery(updated);
+    saveGallery(updated);
+
+    // Reset Form
+    setNewGalleryTitle('');
+    setNewGalleryPreview(null);
+    if (galleryFileInputRef.current) galleryFileInputRef.current.value = '';
+    showNotification(`Added "${newItem.title}" to Gallery!`);
+  };
+
+  const handleDeleteGalleryItem = (id: string) => {
+    if (window.confirm('Are you sure you want to remove this image from the gallery?')) {
+      const updated = gallery.filter((item) => item.id !== id);
+      setGallery(updated);
+      saveGallery(updated);
+      showNotification('Photo removed from Gallery.');
+    }
+  };
+
+  const handleResetGalleryToDefault = () => {
+    if (window.confirm('Reset gallery to initial factory photos?')) {
+      setGallery(DEFAULT_GALLERY);
+      saveGallery(DEFAULT_GALLERY);
+      showNotification('Gallery reset to default factory photos.');
+    }
+  };
+
+  // --- Handlers: Processing Line Photo Upload ---
+  const handleLineFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsProcessing(true);
+      const compressed = await processAndCompressImage(file);
+      setLineImagePreview(compressed);
+    } catch (err) {
+      console.error(err);
+      alert('Error processing image.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleSaveProcessingLinePhoto = () => {
+    if (!lineImagePreview) return;
+    saveProcessingLineMedia(selectedLineSlug, lineImagePreview);
+    setProcessingLinesMedia(getStoredProcessingLinesMedia());
+    setLineImagePreview(null);
+    if (lineFileInputRef.current) lineFileInputRef.current.value = '';
+    const lineObj = PROCESSING_LINES.find((l) => l.slug === selectedLineSlug);
+    showNotification(`Updated live photo for ${lineObj?.name || 'Processing Line'}!`);
+  };
+
+  const handleResetLinePhoto = (slug: string) => {
+    const current = { ...processingLinesMedia };
+    delete current[slug];
+    localStorage.setItem('shivansh_processing_lines_media', JSON.stringify(current));
+    setProcessingLinesMedia(current);
+    window.dispatchEvent(new Event('shivansh-media-updated'));
+    showNotification('Restored default factory machine photo.');
+  };
+
+  // --- Handlers: Equipment Photo Upload ---
+  const handleEquipmentFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsProcessing(true);
+      const compressed = await processAndCompressImage(file);
+      setEquipmentImagePreview(compressed);
+    } catch (err) {
+      console.error(err);
+      alert('Error processing image.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleSaveEquipmentPhoto = () => {
+    if (!equipmentImagePreview) return;
+    saveEquipmentMedia(selectedEquipment, equipmentImagePreview);
+    setEquipmentsMedia(getStoredEquipmentsMedia());
+    setEquipmentImagePreview(null);
+    if (equipmentFileInputRef.current) equipmentFileInputRef.current.value = '';
+    showNotification(`Assigned photo to equipment "${selectedEquipment}"!`);
+  };
+
+  const handleRemoveEquipmentPhoto = (name: string) => {
+    removeEquipmentMedia(name);
+    setEquipmentsMedia(getStoredEquipmentsMedia());
+    showNotification(`Removed photo from "${name}".`);
+  };
+
+  // If not logged in, render Secure Login Box
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-[85vh] bg-canvas flex items-center justify-center py-16 px-4 font-sans relative">
+        <div className="blueprint-watermark" />
+
+        <div className="max-w-md w-full bg-ivory rounded-2xl border border-border shadow-card-elevated p-8 sm:p-10 relative z-10">
+          <div className="w-14 h-14 rounded-2xl bg-canvas border border-border text-sage flex items-center justify-center mx-auto mb-6">
+            <Lock className="w-7 h-7" />
+          </div>
+
+          <div className="text-center mb-8">
+            <h1 className="font-display font-normal text-3xl text-ink tracking-normal">
+              Admin Console
+            </h1>
+            <p className="text-xs sm:text-sm text-ink mt-2">
+              Shivansh Engineering · Media Upload &amp; Control
+            </p>
+          </div>
+
+          {authError && (
+            <div className="mb-6 p-3.5 rounded-xl bg-terracotta/10 border border-terracotta text-xs text-ink font-medium flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-terracotta" />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div>
+              <label className="block text-xs font-semibold text-ink uppercase tracking-[0.1em] mb-2">
+                Username
+              </label>
+              <input
+                type="text"
+                required
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="shivansh"
+                className="w-full px-4 py-3 rounded-xl border border-border-strong bg-ivory text-sm focus:outline-none focus:ring-2 focus:ring-ink/25 focus:border-ink text-ink"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-ink uppercase tracking-[0.1em] mb-2">
+                Password
+              </label>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••"
+                className="w-full px-4 py-3 rounded-xl border border-border-strong bg-ivory text-sm focus:outline-none focus:ring-2 focus:ring-ink/25 focus:border-ink text-ink"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={authPending}
+              className="w-full py-3.5 px-4 text-sm font-semibold text-ivory bg-ink hover:bg-ink-hover rounded-xl transition-colors duration-150 shadow-soft-diffused mt-2"
+            >
+              Sign In to Console
+            </button>
+          </form>
+
+          <div className="mt-8 pt-6 border-t border-border text-center text-xs text-ink font-sans font-medium uppercase tracking-[0.08em]">
+            Authorized Personnel Only · Shivansh OEM
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Current selected processing line item
+  const selectedLineObj = PROCESSING_LINES.find((l) => l.slug === selectedLineSlug) || PROCESSING_LINES[0];
+  const activeCustomLinePhoto = processingLinesMedia[selectedLineSlug]?.mainImage;
+
+  return (
+    <div className="bg-canvas min-h-[85vh] py-10 border-b border-border font-sans relative">
+      <div className="blueprint-watermark" />
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        
+        {/* Top Header & Admin Status Bar */}
+        <div className="bg-ivory rounded-2xl border border-border p-6 sm:p-8 shadow-soft-diffused mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-2.5 mb-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-sage" />
+              <span className="text-xs font-sans font-semibold uppercase tracking-[0.1em] text-ink">
+                ACTIVE ADMIN SESSION · SHIVANSH
+              </span>
+            </div>
+            <h1 className="font-display font-normal text-3xl sm:text-4xl text-ink tracking-normal">
+              Website Media Console
+            </h1>
+            <p className="text-sm text-ink mt-1">
+              Use the publish form to put photos on the live website.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 self-start md:self-auto">
+            <button
+              onClick={() => navigate('/')}
+              className="px-4 py-2.5 rounded-xl border border-ink bg-ivory hover:bg-canvas text-xs font-semibold text-ink transition-colors duration-150 flex items-center gap-2"
+            >
+              <span>View Landing Page</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              onClick={handleLogout}
+              className="px-4 py-2.5 rounded-xl bg-terracotta/15 border border-terracotta hover:bg-terracotta/25 text-xs font-semibold text-ink transition-colors duration-150 flex items-center gap-2"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Log Out</span>
+            </button>
+          </div>
+        </div>
+
+        {authError && <p role="alert" className="mb-4 text-ink">{authError}</p>}
+        <AdminMediaPublisher onSessionExpired={() => {
+          setIsAuthenticated(false);
+          setAuthError('Your session expired. Sign in again to publish.');
+        }} />
+
+        {/* Browser-only previews */}
+        <div className="mb-6 p-4 rounded-2xl bg-terracotta/12 border border-terracotta text-ink text-sm flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-terracotta shrink-0 mt-0.5" />
+          <div>
+            <strong className="font-semibold">Browser-only controls:</strong>{' '}
+            The controls below keep earlier local edits available in this browser. Use the publish form above for live changes.
+          </div>
+        </div>
+
+        {/* Global Success Notification */}
+        {successMsg && (
+          <div className="mb-6 p-4 rounded-2xl bg-ivory border border-sage text-ink text-sm font-medium flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 text-sage shrink-0" />
+            <span>{successMsg} (Saved in this browser only — not published live.)</span>
+          </div>
+        )}
+
+        {/* Section Navigation Tabs */}
+        <div className="flex items-center gap-2 border-b border-border pb-4 mb-8 overflow-x-auto">
+          <button
+            onClick={() => setActiveTab('landing-showcase')}
+            className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors duration-150 flex items-center gap-2 shrink-0 ${
+              activeTab === 'landing-showcase'
+                ? 'bg-ink text-ivory'
+                : 'bg-ivory text-ink hover:bg-canvas border border-border'
+            }`}
+          >
+            <Sparkles className={`w-4 h-4 ${activeTab === 'landing-showcase' ? 'text-ivory' : 'text-sage'}`} />
+            <span>Landing Showcase Box ({landingImages.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('gallery')}
+            className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors duration-150 flex items-center gap-2 shrink-0 ${
+              activeTab === 'gallery'
+                ? 'bg-ink text-ivory'
+                : 'bg-ivory text-ink hover:bg-canvas border border-border'
+            }`}
+          >
+            <ImageIcon className={`w-4 h-4 ${activeTab === 'gallery' ? 'text-ivory' : 'text-sage'}`} />
+            <span>Gallery Photos ({gallery.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('processing-lines')}
+            className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors duration-150 flex items-center gap-2 shrink-0 ${
+              activeTab === 'processing-lines'
+                ? 'bg-ink text-ivory'
+                : 'bg-ivory text-ink hover:bg-canvas border border-border'
+            }`}
+          >
+            <Layers className={`w-4 h-4 ${activeTab === 'processing-lines' ? 'text-ivory' : 'text-sage'}`} />
+            <span>Processing Lines (12 Lines)</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('equipments')}
+            className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors duration-150 flex items-center gap-2 shrink-0 ${
+              activeTab === 'equipments'
+                ? 'bg-ink text-ivory'
+                : 'bg-ivory text-ink hover:bg-canvas border border-border'
+            }`}
+          >
+            <Cog className={`w-4 h-4 ${activeTab === 'equipments' ? 'text-ivory' : 'text-sage'}`} />
+            <span>Equipments Units (29 Units)</span>
+          </button>
+        </div>
+
+        {/* TAB 0: LANDING PAGE ELEVATED SHOWCASE BOX MANAGEMENT */}
+        {activeTab === 'landing-showcase' && (
+          <div className="space-y-8">
+            <div className="bg-ivory rounded-2xl border border-border p-6 sm:p-8 shadow-soft-diffused">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4 mb-6">
+                <div>
+                  <h2 className="font-display font-normal text-2xl text-ink">
+                    Add Slide to Landing Page Elevated Showcase Box
+                  </h2>
+                  <p className="text-xs text-ink/80 mt-0.5">
+                    Images added here dynamically cycle in the animated bottom-right floating box on the homepage.
+                  </p>
+                </div>
+                <button
+                  onClick={handleResetShowcaseToDefaults}
+                  className="text-xs font-semibold text-ink hover:bg-canvas border border-border flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors duration-150"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-sage" />
+                  <span>Reset to Factory Defaults</span>
+                </button>
+              </div>
+
+              <form onSubmit={handleAddShowcaseImage} className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                
+                {/* Left: Input Selection & Preview */}
+                <div className="lg:col-span-5">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-semibold text-ink uppercase tracking-[0.1em]">
+                      Showcase Image *
+                    </label>
+                    <div className="inline-flex p-0.5 bg-canvas border border-border rounded-lg text-[11px] font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setShowcaseInputMode('upload')}
+                        className={`px-2.5 py-1 rounded-md transition-colors duration-150 ${
+                          showcaseInputMode === 'upload' ? 'bg-ink text-ivory' : 'text-ink'
+                        }`}
+                      >
+                        File Upload
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowcaseInputMode('url')}
+                        className={`px-2.5 py-1 rounded-md transition-colors duration-150 ${
+                          showcaseInputMode === 'url' ? 'bg-ink text-ivory' : 'text-ink'
+                        }`}
+                      >
+                        Image URL
+                      </button>
+                    </div>
+                  </div>
+
+                  {showcaseInputMode === 'upload' ? (
+                    <div>
+                      <div
+                        onClick={() => showcaseFileInputRef.current?.click()}
+                        className="border-2 border-dashed border-border-strong hover:border-sage bg-canvas/60 hover:bg-canvas rounded-2xl p-6 text-center cursor-pointer transition-colors duration-150 aspect-[16/10] flex flex-col items-center justify-center relative overflow-hidden group"
+                      >
+                        {newShowcasePreview ? (
+                          <img
+                            src={newShowcasePreview}
+                            alt="Preview"
+                            className="w-full h-full object-cover rounded-xl"
+                          />
+                        ) : (
+                          <>
+                            <div className="w-12 h-12 rounded-xl bg-ivory border border-border text-sage flex items-center justify-center mb-3">
+                              <Upload className="w-6 h-6 text-sage" />
+                            </div>
+                            <div className="text-sm font-semibold text-ink">
+                              Upload Machinery Photo
+                            </div>
+                            <div className="text-xs text-ink/75 mt-1">
+                              PNG, JPG, WebP (Optimized)
+                            </div>
+                          </>
+                        )}
+                        <input
+                          ref={showcaseFileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleShowcaseFileSelect}
+                          className="hidden"
+                        />
+                      </div>
+
+                      {newShowcasePreview && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewShowcasePreview(null);
+                            if (showcaseFileInputRef.current) showcaseFileInputRef.current.value = '';
+                          }}
+                          className="text-xs font-semibold text-ink underline decoration-terracotta mt-2 block"
+                        >
+                          Clear Uploaded Photo
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="relative mb-3">
+                        <input
+                          type="url"
+                          placeholder="https://example.com/machine-image.jpg"
+                          value={newShowcaseUrl}
+                          onChange={(e) => setNewShowcaseUrl(e.target.value)}
+                          className="w-full px-4 py-2.5 rounded-xl border border-border-strong bg-ivory text-ink text-sm focus:ring-2 focus:ring-ink/25 focus:border-ink focus:outline-none"
+                        />
+                      </div>
+                      <div className="aspect-[16/10] rounded-2xl border border-border bg-canvas flex items-center justify-center overflow-hidden">
+                        {newShowcaseUrl.trim() ? (
+                          <img
+                            src={newShowcaseUrl}
+                            alt="URL Preview"
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <span className="text-xs text-ink/70">Enter Image URL Above</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right: Heading Title Only & Submit */}
+                <div className="lg:col-span-7 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-ink uppercase tracking-[0.1em] mb-1.5">
+                        Slide Heading Title Only * (No Paragraphs)
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. CONTINUOUS HIGH-SPEED SLITTING LINE"
+                        value={newShowcaseTitle}
+                        onChange={(e) => setNewShowcaseTitle(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-border-strong bg-ivory text-ink text-sm focus:ring-2 focus:ring-ink/25 focus:border-ink focus:outline-none uppercase font-semibold"
+                      />
+                      <span className="text-[11px] text-ink/75 mt-1 block">
+                        Strict "Headings-Only" architecture: this title is displayed prominently in the bottom corner of the slide.
+                      </span>
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-canvas border border-border text-xs text-ink space-y-1">
+                      <div className="font-semibold text-ink">Showcase Specifications:</div>
+                      <div>• Slides rotate automatically every 3.5 seconds with smooth cross-fade animation.</div>
+                      <div>• Pauses on mouse hover so visitors can inspect the machine details.</div>
+                      <div>• Updates live immediately across all active browser sessions.</div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 mt-4 border-t border-border">
+                    <button
+                      type="submit"
+                      disabled={isProcessing || (!newShowcasePreview && !newShowcaseUrl.trim()) || !newShowcaseTitle.trim()}
+                      className="w-full py-3.5 px-6 rounded-xl bg-ink hover:bg-ink-hover disabled:opacity-50 text-ivory font-semibold text-sm shadow-soft-diffused transition-colors duration-150 flex items-center justify-center gap-2"
+                    >
+                      <Plus className="w-4 h-4 text-ivory" />
+                      <span>{isProcessing ? 'Processing Image...' : 'Save to Browser Only (Not Live)'}</span>
+                    </button>
+                  </div>
+                </div>
+
+              </form>
+            </div>
+
+            {/* Current Showcase Slides */}
+            <div className="bg-ivory rounded-2xl border border-border p-6 sm:p-8 shadow-soft-diffused">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="font-display font-normal text-2xl text-ink">
+                    Active Showcase Slides ({landingImages.length})
+                  </h2>
+                  <p className="text-xs text-ink/80 mt-0.5">
+                    Reorder slides using the arrows or delete slides. First slide displays initially on page load.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {landingImages.map((slide, idx) => (
+                  <div
+                    key={slide.id || idx}
+                    className="rounded-2xl border border-border overflow-hidden bg-canvas/60 flex flex-col justify-between hover:border-sage transition-colors duration-150"
+                  >
+                    <div>
+                      <div className="aspect-[16/10] bg-canvas overflow-hidden relative">
+                        <img
+                          src={slide.imageUrl}
+                          alt={slide.title}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute top-2 left-2 bg-ink text-ivory text-[10px] font-sans font-semibold px-2 py-0.5 rounded-md uppercase tracking-[0.08em]">
+                          SLIDE #{idx + 1}
+                        </div>
+                      </div>
+
+                      <div className="p-4">
+                        <h3 className="text-sm font-semibold text-ink uppercase line-clamp-2">
+                          {slide.title}
+                        </h3>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-ivory border-t border-border flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleMoveShowcaseImage(idx, 'up')}
+                          disabled={idx === 0}
+                          title="Move Earlier"
+                          className="p-1.5 rounded-lg border border-border hover:bg-canvas disabled:opacity-30 disabled:pointer-events-none text-ink transition-colors duration-150"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleMoveShowcaseImage(idx, 'down')}
+                          disabled={idx === landingImages.length - 1}
+                          title="Move Later"
+                          className="p-1.5 rounded-lg border border-border hover:bg-canvas disabled:opacity-30 disabled:pointer-events-none text-ink transition-colors duration-150"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteShowcaseImage(slide.id)}
+                        className="text-xs text-ink font-semibold px-2 py-1.5 rounded-lg border border-terracotta/60 hover:bg-terracotta/15 transition-colors duration-150 flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-terracotta" />
+                        <span>Remove</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 1: GALLERY PHOTOS MANAGEMENT */}
+        {activeTab === 'gallery' && (
+          <div className="space-y-8">
+            <div className="bg-ivory rounded-2xl border border-border p-6 sm:p-8 shadow-soft-diffused">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4 mb-6">
+                <div>
+                  <h2 className="font-display font-normal text-2xl text-ink">
+                    Upload New Photo to Gallery
+                  </h2>
+                  <p className="text-xs text-ink/80 mt-0.5">
+                    Images will immediately appear in the public Field Gallery page.
+                  </p>
+                </div>
+                <button
+                  onClick={handleResetGalleryToDefault}
+                  className="text-xs font-semibold text-ink hover:bg-canvas border border-border flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors duration-150"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-sage" />
+                  <span>Reset Gallery to Default</span>
+                </button>
+              </div>
+
+              <form onSubmit={handleAddGalleryItem} className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                <div className="lg:col-span-5">
+                  <label className="block text-xs font-semibold text-ink uppercase tracking-[0.1em] mb-2">
+                    Photo File *
+                  </label>
+
+                  <div
+                    onClick={() => galleryFileInputRef.current?.click()}
+                    className="border-2 border-dashed border-border-strong hover:border-sage bg-canvas/60 hover:bg-canvas rounded-2xl p-6 text-center cursor-pointer transition-colors duration-150 aspect-[4/3] flex flex-col items-center justify-center relative overflow-hidden"
+                  >
+                    {newGalleryPreview ? (
+                      <img
+                        src={newGalleryPreview}
+                        alt="Preview"
+                        className="w-full h-full object-cover rounded-xl"
+                      />
+                    ) : (
+                      <>
+                        <div className="w-12 h-12 rounded-xl bg-ivory border border-border text-sage flex items-center justify-center mb-3">
+                          <Upload className="w-6 h-6 text-sage" />
+                        </div>
+                        <div className="text-sm font-semibold text-ink">
+                          Click to Browse or Drag Photo
+                        </div>
+                        <div className="text-xs text-ink/75 mt-1">
+                          PNG, JPG, WebP (Automatically optimized)
+                        </div>
+                      </>
+                    )}
+                    <input
+                      ref={galleryFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleGalleryFileSelect}
+                      className="hidden"
+                    />
+                  </div>
+
+                  {newGalleryPreview && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewGalleryPreview(null);
+                        if (galleryFileInputRef.current) galleryFileInputRef.current.value = '';
+                      }}
+                      className="text-xs font-semibold text-ink underline decoration-terracotta mt-2 block"
+                    >
+                      Clear Selected Photo
+                    </button>
+                  )}
+                </div>
+
+                <div className="lg:col-span-7 space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-ink uppercase tracking-[0.1em] mb-1.5">
+                      Photo Title / Machine Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Continuous 2100mm Slitting Line Assembly"
+                      value={newGalleryTitle}
+                      onChange={(e) => setNewGalleryTitle(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl border border-border-strong bg-ivory text-ink text-sm focus:ring-2 focus:ring-ink/25 focus:border-ink focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-ink uppercase tracking-[0.1em] mb-1.5">
+                        Category
+                      </label>
+                      <select
+                        value={newGalleryCategory}
+                        onChange={(e) => setNewGalleryCategory(e.target.value as 'processing-line' | 'equipment' | 'installation')}
+                        className="w-full px-4 py-2.5 rounded-xl border border-border-strong text-ink text-sm focus:ring-2 focus:ring-ink/25 focus:border-ink focus:outline-none bg-ivory"
+                      >
+                        <option value="processing-line">Processing Line</option>
+                        <option value="equipment">Equipments</option>
+                        <option value="installation">Installation</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-ink uppercase tracking-[0.1em] mb-1.5">
+                        Location / Factory
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Sanaswadi Plant, Pune"
+                        value={newGalleryLocation}
+                        onChange={(e) => setNewGalleryLocation(e.target.value)}
+                        className="w-full px-4 py-2.5 rounded-xl border border-border-strong bg-ivory text-ink text-sm focus:ring-2 focus:ring-ink/25 focus:border-ink focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-ink uppercase tracking-[0.1em] mb-1.5">
+                      Speed / Technical Specification
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 300 m/min · 0.2mm to 8.0mm"
+                      value={newGallerySpeed}
+                      onChange={(e) => setNewGallerySpeed(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl border border-border-strong bg-ivory text-ink text-sm focus:ring-2 focus:ring-ink/25 focus:border-ink focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      disabled={isProcessing || !newGalleryPreview}
+                      className="w-full py-3.5 px-6 rounded-xl bg-ink hover:bg-ink-hover disabled:opacity-50 text-ivory font-semibold text-sm shadow-soft-diffused transition-colors duration-150 flex items-center justify-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>{isProcessing ? 'Processing Image...' : 'Save Photo to Browser Only (Not Live)'}</span>
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <div className="bg-ivory rounded-2xl border border-border p-6 sm:p-8 shadow-soft-diffused">
+              <h2 className="font-display font-normal text-2xl text-ink mb-6">
+                Current Gallery Photos ({gallery.length})
+              </h2>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+                {gallery.map((photo) => (
+                  <div
+                    key={photo.id}
+                    className="rounded-2xl border border-border overflow-hidden bg-canvas/60 flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="aspect-[4/3] bg-canvas overflow-hidden relative">
+                        <img
+                          src={photo.imageUrl}
+                          alt={photo.title}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute top-2 left-2 bg-ink text-ivory text-[10px] font-sans font-medium px-2 py-0.5 rounded-md uppercase tracking-[0.08em]">
+                          {photo.category}
+                        </div>
+                      </div>
+
+                      <div className="p-4">
+                        <h3 className="text-sm font-semibold text-ink line-clamp-2">
+                          {photo.title}
+                        </h3>
+                        <div className="text-xs text-ink/80 mt-1 flex items-center justify-between tabular-nums">
+                          <span>{photo.location}</span>
+                          <span className="font-medium text-ink">{photo.speed}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-ivory border-t border-border flex items-center justify-between">
+                      <span className="text-[11px] font-sans tabular-nums text-ink/75">
+                        {photo.uploadedAt}
+                      </span>
+                      <button
+                        onClick={() => handleDeleteGalleryItem(photo.id)}
+                        className="text-xs text-ink font-semibold px-2 py-1.5 rounded-lg border border-terracotta/60 hover:bg-terracotta/15 transition-colors duration-150 flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-terracotta" />
+                        <span>Remove</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: PROCESSING LINES PHOTOS (12 LINES) */}
+        {activeTab === 'processing-lines' && (
+          <div className="bg-ivory rounded-2xl border border-border p-6 sm:p-8 shadow-soft-diffused">
+            <div className="border-b border-border pb-4 mb-6">
+              <h2 className="font-display font-normal text-2xl text-ink">
+                Update Processing Line Photos (12 Lines)
+              </h2>
+              <p className="text-xs text-ink/80 mt-0.5">
+                Select any of the 12 processing lines below to view its current live image and upload a new machine photo.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              <div className="lg:col-span-4 border-r border-border pr-0 lg:pr-6 space-y-1">
+                <div className="text-xs font-sans font-semibold uppercase tracking-[0.1em] text-ink mb-3">
+                  Select Line to Manage
+                </div>
+
+                <div className="space-y-1 max-h-[65vh] overflow-y-auto pr-1">
+                  {PROCESSING_LINES.map((line) => {
+                    const isSelected = line.slug === selectedLineSlug;
+                    const hasCustomPhoto = !!processingLinesMedia[line.slug]?.mainImage;
+                    return (
+                      <button
+                        key={line.id}
+                        onClick={() => {
+                          setSelectedLineSlug(line.slug);
+                          setLineImagePreview(null);
+                        }}
+                        className={`w-full text-left px-3.5 py-3 rounded-xl text-xs font-semibold transition-colors duration-150 flex items-center justify-between ${
+                          isSelected
+                            ? 'bg-ink text-ivory'
+                            : 'hover:bg-canvas text-ink'
+                        }`}
+                      >
+                        <span>{line.name}</span>
+                        {hasCustomPhoto && (
+                          <span className="w-2 h-2 rounded-full bg-sage shrink-0" title="Custom Photo Active" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="lg:col-span-8 space-y-6">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-display font-normal text-2xl text-ink">
+                      {selectedLineObj.name}
+                    </h3>
+                    <button
+                      onClick={() => navigate(`/products/processing-line/${selectedLineObj.slug}`)}
+                      className="text-xs font-semibold text-ink hover:underline decoration-sage underline-offset-4 flex items-center gap-1"
+                    >
+                      <span>Preview Live Page</span>
+                      <ExternalLink className="w-3.5 h-3.5 text-sage" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-ink/80">
+                    {selectedLineObj.subtitle}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-center">
+                  <div>
+                    <div className="text-xs font-sans font-semibold text-ink uppercase tracking-[0.1em] mb-2">
+                      Active Live Image:
+                    </div>
+                    <div className="aspect-[4/3] rounded-2xl overflow-hidden border border-border bg-canvas relative">
+                      <img
+                        src={activeCustomLinePhoto || selectedLineObj.image}
+                        alt={selectedLineObj.name}
+                        className="w-full h-full object-cover"
+                      />
+                      {activeCustomLinePhoto && (
+                        <div className="absolute top-2 left-2 bg-ink text-ivory text-[10px] font-sans font-medium px-2 py-0.5 rounded-md">
+                          Custom Upload Active
+                        </div>
+                      )}
+                    </div>
+                    {activeCustomLinePhoto && (
+                      <button
+                        onClick={() => handleResetLinePhoto(selectedLineSlug)}
+                        className="text-xs text-ink underline decoration-terracotta mt-2 block"
+                      >
+                        Reset to default factory photo
+                      </button>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-sans font-semibold text-ink uppercase tracking-[0.1em] mb-2">
+                      Upload New Photo:
+                    </div>
+
+                    <div
+                      onClick={() => lineFileInputRef.current?.click()}
+                      className="border-2 border-dashed border-border-strong hover:border-sage bg-canvas/60 hover:bg-canvas rounded-2xl p-4 text-center cursor-pointer transition-colors duration-150 aspect-[4/3] flex flex-col items-center justify-center relative overflow-hidden"
+                    >
+                      {lineImagePreview ? (
+                        <img
+                          src={lineImagePreview}
+                          alt="New Selection"
+                          className="w-full h-full object-cover rounded-xl"
+                        />
+                      ) : (
+                        <>
+                          <Upload className="w-6 h-6 text-sage mb-2" />
+                          <div className="text-xs font-semibold text-ink">
+                            Select New Photo for {selectedLineObj.name}
+                          </div>
+                          <div className="text-[11px] text-ink/75 mt-1">
+                            PNG, JPG, WebP
+                          </div>
+                        </>
+                      )}
+                      <input
+                        ref={lineFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleLineFileSelect}
+                        className="hidden"
+                      />
+                    </div>
+
+                    {lineImagePreview && (
+                      <div className="mt-3 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSaveProcessingLinePhoto}
+                          className="flex-1 py-2.5 px-4 bg-ink hover:bg-ink-hover text-ivory font-semibold text-xs rounded-xl transition-colors duration-150"
+                        >
+                          Save Photo to Browser Only (Not Live)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLineImagePreview(null)}
+                          className="py-2.5 px-3 bg-ivory border border-ink hover:bg-canvas text-ink text-xs font-semibold rounded-xl transition-colors duration-150"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: EQUIPMENTS PHOTOS (29 UNITS) */}
+        {activeTab === 'equipments' && (
+          <div className="bg-ivory rounded-2xl border border-border p-6 sm:p-8 shadow-soft-diffused">
+            <div className="border-b border-border pb-4 mb-6">
+              <h2 className="font-display font-normal text-2xl text-ink">
+                Upload Machinery Photos for Equipments (29 Units)
+              </h2>
+              <p className="text-xs text-ink/80 mt-0.5">
+                Attach dedicated machine photos to any of the 29 equipment boxes.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              <div className="lg:col-span-5 border-r border-border pr-0 lg:pr-6 space-y-1">
+                <div className="text-xs font-sans font-semibold uppercase tracking-[0.1em] text-ink mb-3">
+                  Select Equipment Unit (29 Total)
+                </div>
+
+                <div className="space-y-1 max-h-[65vh] overflow-y-auto pr-1">
+                  {EQUIPMENTS_LIST.map((name, idx) => {
+                    const isSelected = name === selectedEquipment;
+                    const hasPhoto = !!equipmentsMedia[name]?.imageUrl;
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          setSelectedEquipment(name);
+                          setEquipmentImagePreview(null);
+                        }}
+                        className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-semibold tabular-nums transition-colors duration-150 flex items-center justify-between ${
+                          isSelected
+                            ? 'bg-ink text-ivory'
+                            : 'hover:bg-canvas text-ink'
+                        }`}
+                      >
+                        <span className="truncate pr-2">
+                          #{String(idx + 1).padStart(2, '0')} {name}
+                        </span>
+                        {hasPhoto && (
+                          <span className="w-2 h-2 rounded-full bg-sage shrink-0" title="Photo Attached" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="lg:col-span-7 space-y-6">
+                <div>
+                  <h3 className="font-display font-normal text-2xl text-ink">
+                    {selectedEquipment}
+                  </h3>
+                  <p className="text-xs text-ink/80 mt-1">
+                    Heavy industrial auxiliary unit for metal rolling mills
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-center">
+                  <div>
+                    <div className="text-xs font-sans font-semibold text-ink uppercase tracking-[0.1em] mb-2">
+                      Current Unit Photo:
+                    </div>
+                    <div className="aspect-[4/3] rounded-2xl overflow-hidden border border-border bg-canvas relative flex items-center justify-center text-center p-4">
+                      {equipmentsMedia[selectedEquipment]?.imageUrl ? (
+                        <img
+                          src={equipmentsMedia[selectedEquipment].imageUrl}
+                          alt={selectedEquipment}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="text-xs text-ink/70">
+                          No Photo Uploaded Yet
+                        </div>
+                      )}
+                    </div>
+                    {equipmentsMedia[selectedEquipment]?.imageUrl && (
+                      <button
+                        onClick={() => handleRemoveEquipmentPhoto(selectedEquipment)}
+                        className="text-xs text-ink underline decoration-terracotta mt-2 block font-semibold"
+                      >
+                        Remove this photo
+                      </button>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-sans font-semibold text-ink uppercase tracking-[0.1em] mb-2">
+                      Upload Unit Photo:
+                    </div>
+
+                    <div
+                      onClick={() => equipmentFileInputRef.current?.click()}
+                      className="border-2 border-dashed border-border-strong hover:border-sage bg-canvas/60 hover:bg-canvas rounded-2xl p-4 text-center cursor-pointer transition-colors duration-150 aspect-[4/3] flex flex-col items-center justify-center relative overflow-hidden"
+                    >
+                      {equipmentImagePreview ? (
+                        <img
+                          src={equipmentImagePreview}
+                          alt="New Selection"
+                          className="w-full h-full object-cover rounded-xl"
+                        />
+                      ) : (
+                        <>
+                          <Upload className="w-6 h-6 text-sage mb-2" />
+                          <div className="text-xs font-semibold text-ink">
+                            Select Photo
+                          </div>
+                          <div className="text-[11px] text-ink/75 mt-1">
+                            PNG, JPG, WebP
+                          </div>
+                        </>
+                      )}
+                      <input
+                        ref={equipmentFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleEquipmentFileSelect}
+                        className="hidden"
+                      />
+                    </div>
+
+                    {equipmentImagePreview && (
+                      <div className="mt-3 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSaveEquipmentPhoto}
+                          className="flex-1 py-2.5 px-4 bg-ink hover:bg-ink-hover text-ivory font-semibold text-xs rounded-xl transition-colors duration-150"
+                        >
+                          Save Photo to Browser Only (Not Live)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEquipmentImagePreview(null)}
+                          className="py-2.5 px-3 bg-ivory border border-ink hover:bg-canvas text-ink text-xs font-semibold rounded-xl transition-colors duration-150"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-canvas border border-border text-xs text-ink flex items-center justify-between gap-4">
+                  <span>
+                    Photos attached here will appear directly on the <strong>Equipments</strong> page cards.
+                  </span>
+                  <button
+                    onClick={() => navigate('/products/equipments')}
+                    className="text-xs font-semibold text-ink hover:underline decoration-sage underline-offset-4 shrink-0"
+                  >
+                    View Equipments Page →
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+};
+
+===== END FILE =====
+
+===== FILE: src/pages/GalleryPage.tsx =====
+import React, { useState } from 'react';
+import { Image as ImageIcon, MapPin, X, Eye } from 'lucide-react';
+import { DEFAULT_GALLERY } from '../services/mediaStore';
+import {
+  usePublishedMedia,
+  getPublishedGalleryPhotos,
+  PublishedGalleryPhoto,
+} from '../services/publishedMedia';
+import { useRouter } from '../router/Router';
+
+export const GalleryPage: React.FC = () => {
+  const { navigate } = useRouter();
+  const { items: publishedMedia } = usePublishedMedia();
+  const publishedGallery = getPublishedGalleryPhotos(publishedMedia);
+  const galleryItems: PublishedGalleryPhoto[] =
+    [...publishedGallery, ...DEFAULT_GALLERY];
+
+  const [activeTab, setActiveTab] = useState<'all' | 'processing-line' | 'equipment'>('all');
+  const [selectedPhoto, setSelectedPhoto] = useState<PublishedGalleryPhoto | null>(null);
+
+  const filteredItems =
+    activeTab === 'all'
+      ? galleryItems
+      : galleryItems.filter((item) => item.category === activeTab);
+
+  return (
+    <div className="bg-canvas min-h-[80vh] py-16 border-b border-border relative font-sans">
+      <div className="blueprint-watermark" />
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        
+        {/* Page Header */}
+        <div className="border-b border-border pb-8 mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-sans font-semibold uppercase tracking-[0.1em] text-ink mb-2">
+              <ImageIcon className="w-4 h-4 text-sage" />
+              FIELD INSTALLATIONS &amp; WORKSHOP MACHINERY
+            </div>
+            <h1 className="font-display font-normal text-4xl sm:text-5xl text-ink tracking-normal">
+              Gallery
+            </h1>
+          </div>
+
+          {/* Interactive filter tabs */}
+          <div className="inline-flex p-1 bg-ivory border border-border rounded-xl self-start md:self-end">
+            <button
+              onClick={() => setActiveTab('all')}
+              className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors duration-150 ${
+                activeTab === 'all'
+                  ? 'bg-ink text-ivory'
+                  : 'text-ink hover:bg-canvas'
+              }`}
+            >
+              All ({galleryItems.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('processing-line')}
+              className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors duration-150 ${
+                activeTab === 'processing-line'
+                  ? 'bg-ink text-ivory'
+                  : 'text-ink hover:bg-canvas'
+              }`}
+            >
+              Processing Lines
+            </button>
+            <button
+              onClick={() => setActiveTab('equipment')}
+              className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors duration-150 ${
+                activeTab === 'equipment'
+                  ? 'bg-ink text-ivory'
+                  : 'text-ink hover:bg-canvas'
+              }`}
+            >
+              Equipments
+            </button>
+          </div>
+        </div>
+
+        {/* Section Title */}
+        <div className="border-b border-border pb-3 mb-8 flex items-center justify-between gap-4">
+          <h2 className="font-display font-normal text-2xl sm:text-3xl text-ink tracking-normal">
+            Commissioned Field Installations &amp; OEM Machinery
+          </h2>
+          <span className="text-xs font-sans font-medium tabular-nums text-ink shrink-0">
+            {filteredItems.length} Photographs on file
+          </span>
+        </div>
+
+        {/* Gallery Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16">
+          {filteredItems.map((item) => (
+            <div
+              key={item.id}
+              onClick={() => setSelectedPhoto(item)}
+              className="bg-ivory rounded-2xl border border-border overflow-hidden shadow-soft-diffused hover:border-sage hover:shadow-card-elevated transition-[border-color,box-shadow] duration-200 cursor-pointer group flex flex-col justify-between"
+            >
+              <div>
+                <div className="relative aspect-[16/10] bg-canvas overflow-hidden">
+                  <img
+                    src={item.imageUrl}
+                    alt={item.altText || item.title}
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      const fallback = `${window.location.origin}/slitting-line-factory.png`;
+                      if (target.src !== fallback) {
+                        target.src = '/slitting-line-factory.png';
+                      }
+                    }}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-ink/40 opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center justify-center">
+                    <span className="px-3.5 py-2 bg-ivory text-ink border border-border font-semibold text-xs rounded-xl shadow-soft-diffused flex items-center gap-1.5">
+                      <Eye className="w-3.5 h-3.5 text-sage" />
+                      <span>View Photo</span>
+                    </span>
+                  </div>
+                  <div className="absolute top-2.5 left-2.5 bg-ink text-ivory text-[10px] font-sans font-medium px-2.5 py-0.5 rounded-md uppercase tracking-[0.08em]">
+                    {item.category}
+                  </div>
+                </div>
+
+                <div className="p-5">
+                  <div className="flex items-center justify-between text-xs text-ink font-sans tabular-nums mb-2">
+                    <span className="flex items-center gap-1 text-ink truncate max-w-[65%]">
+                      <MapPin className="w-3 h-3 text-sage shrink-0" />
+                      <span className="truncate">{item.location}</span>
+                    </span>
+                    <span className="text-ink font-semibold shrink-0">{item.speed}</span>
+                  </div>
+
+                  <h3 className="text-base font-semibold text-ink line-clamp-2 leading-snug">
+                    {item.title}
+                  </h3>
+                </div>
+              </div>
+
+              <div className="px-5 pb-4 pt-2 border-t border-border flex items-center justify-between text-xs text-ink font-sans uppercase tracking-[0.08em]">
+                <span>COMMISSIONED OEM</span>
+                <span className="font-semibold text-ink">SHIVANSH EN陆续</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Bottom Action */}
+        <div className="p-8 rounded-2xl border border-border bg-ivory shadow-soft-diffused flex flex-col md:flex-row items-center justify-between gap-6">
+          <div>
+            <h3 className="font-display font-normal text-xl sm:text-2xl text-ink">
+              Installation GA Drawings &amp; Plant Layouts
+            </h3>
+            <div className="text-xs font-sans font-semibold text-ink uppercase tracking-[0.1em] mt-1">
+              General Arrangement (GA) Engineering Drawings Available
+            </div>
+          </div>
+
+          <button
+            onClick={() => navigate('/contact')}
+            className="px-7 py-3 text-xs sm:text-sm font-semibold text-ivory bg-ink hover:bg-ink-hover rounded-xl transition-colors duration-150 shadow-soft-diffused whitespace-nowrap"
+          >
+            Contact Engineering Team
+          </button>
+        </div>
+
+      </div>
+
+      {/* Lightbox Modal */}
+      {selectedPhoto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/75"
+          onClick={() => setSelectedPhoto(null)}
+        >
+          <div
+            className="relative w-full max-w-3xl bg-ivory rounded-2xl shadow-card-elevated border border-border-strong overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-canvas">
+              <div className="flex items-center gap-2 text-xs font-sans tabular-nums text-ink">
+                <MapPin className="w-3.5 h-3.5 text-sage" />
+                <span className="font-semibold text-ink">{selectedPhoto.location}</span>
+                <span className="text-ink/50">·</span>
+                <span className="text-ink font-semibold">{selectedPhoto.speed}</span>
+              </div>
+              <button
+                onClick={() => setSelectedPhoto(null)}
+                className="p-1.5 text-ink hover:bg-ivory border border-transparent hover:border-border rounded-xl transition-colors duration-150"
+                aria-label="Close photo preview"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div className="aspect-[16/10] bg-canvas rounded-xl overflow-hidden border border-border mb-5">
+                <img
+                  src={selectedPhoto.imageUrl}
+                  alt={selectedPhoto.altText || selectedPhoto.title}
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    const fallback = `${window.location.origin}/slitting-line-factory.png`;
+                    if (target.src !== fallback) {
+                      target.src = '/slitting-line-factory.png';
+                    }
+                  }}
+                  className="w-full h-full object-contain bg-ink"
+                />
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-display font-normal text-xl sm:text-2xl text-ink">
+                    {selectedPhoto.title}
+                  </h3>
+                  <div className="text-xs text-ink font-sans font-medium uppercase tracking-[0.08em] mt-1">
+                    Category: {selectedPhoto.category.toUpperCase()}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => navigate('/contact')}
+                  className="px-6 py-2.5 text-xs font-semibold text-ivory bg-ink hover:bg-ink-hover rounded-xl whitespace-nowrap transition-colors duration-150 shadow-soft-diffused"
+                >
+                  Inquire on Similar System
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+===== END FILE =====
+
+===== FILE: supabase/migrations/20261123000000_grant_media_publish.sql =====
+grant insert on table public.website_media to service_role;
+
+===== END FILE =====
+
+===== FILE: worker/admin.ts =====
+interface AdminEnvironment {
+  ADMIN_USERNAME?: string;
+  ADMIN_PASSWORD_HASH?: string;
+  ADMIN_SESSION_SECRET?: string;
+  ADMIN_LOGIN_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
+  SUPABASE_URL?: string;
+  SUPABASE_SECRET_KEY?: string;
+}
+
+const COOKIE = '__Host-shivansh-admin';
+const SESSION_SECONDS = 3600;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const encoder = new TextEncoder();
+const extensions = new Map([
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+  ['image/webp', 'webp'],
+]);
+
+function reply(status: number, body: Record<string, unknown>, cookie?: string) {
+  return Response.json(body, {
+    status,
+    headers: { 'Cache-Control': 'no-store', ...(cookie ? { 'Set-Cookie': cookie } : {}) },
+  });
+}
+
+function sessionCookie(value: string, age: number) {
+  return `${COOKIE}=${value}; Max-Age=${age}; Path=/; Secure; HttpOnly; SameSite=Strict`;
+}
+
+async function signingKey(secret: string) {
+  return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+}
+
+function hex(data: ArrayBuffer) {
+  return Array.from(new Uint8Array(data), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function verifyAdminSession(request: Request, key: CryptoKey) {
+  const cookie = request.headers.get('Cookie')?.split(';').map((part) => part.trim())
+    .find((part) => part.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
+  const match = cookie?.match(/^(\d{1,12}\.[0-9a-f-]{36})\.([0-9a-f]{64})$/);
+  if (!match || Number(match[1].split('.')[0]) <= Math.floor(Date.now() / 1000)) return false;
+  const signature = Uint8Array.from(match[2].match(/../g)!, (byte) => parseInt(byte, 16));
+  return crypto.subtle.verify('HMAC', key, signature, encoder.encode(match[1]));
+}
+
+async function readBody(request: Request, maxBytes: number): Promise<ArrayBuffer> {
+  if (Number(request.headers.get('Content-Length')) > maxBytes) throw new RangeError('Size limit exceeded');
+  const reader = request.body?.getReader();
+  const data = new Uint8Array(maxBytes);
+  let offset = 0;
+  while (reader) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (offset + value.byteLength > maxBytes) {
+      void reader.cancel().catch(() => undefined);
+      throw new RangeError('Size limit exceeded');
+    }
+    data.set(value, offset);
+    offset += value.byteLength;
+  }
+  return data.buffer.slice(0, offset);
+}
+
+async function login(request: Request, env: AdminEnvironment, key: CryptoKey) {
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const { success } = await env.ADMIN_LOGIN_RATE_LIMITER!.limit({ key: ip });
+  if (!success) return reply(429, { ok: false, error: 'Too many attempts. Try again in a minute.' });
+
+  let credentials: { username?: unknown; password?: unknown };
+  try {
+    credentials = JSON.parse(new TextDecoder().decode(await readBody(request, 1024)));
+  } catch {
+    return reply(400, { ok: false, error: 'Invalid login request.' });
+  }
+  if (typeof credentials?.password !== 'string' || typeof credentials.username !== 'string') {
+    return reply(400, { ok: false, error: 'Invalid login request.' });
+  }
+  const digest = hex(await crypto.subtle.digest('SHA-256', encoder.encode(credentials.password)));
+  const expectedSignature = await crypto.subtle.sign('HMAC', key, encoder.encode(env.ADMIN_PASSWORD_HASH));
+  const matches = await crypto.subtle.verify('HMAC', key, expectedSignature, encoder.encode(digest));
+  if (!matches || credentials.username !== env.ADMIN_USERNAME) {
+    return reply(401, { ok: false, error: 'Incorrect username or password.' });
+  }
+  const payload = `${Math.floor(Date.now() / 1000) + SESSION_SECONDS}.${crypto.randomUUID()}`;
+  const signature = hex(await crypto.subtle.sign('HMAC', key, encoder.encode(payload)));
+  return reply(200, { ok: true }, sessionCookie(`${payload}.${signature}`, SESSION_SECONDS));
+}
+
+function matchesImage(bytes: Uint8Array, type: string) {
+  if (type === 'image/jpeg') return bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+  if (type === 'image/png') return [137, 80, 78, 71, 13, 10, 26, 10].every((byte, i) => bytes[i] === byte);
+  return new TextDecoder().decode(bytes.slice(0, 4)) === 'RIFF'
+    && new TextDecoder().decode(bytes.slice(8, 12)) === 'WEBP';
+}
+
+async function publishMedia(request: Request, env: AdminEnvironment) {
+  const origin = env.SUPABASE_URL?.trim().replace(/\/$/, '');
+  const secret = env.SUPABASE_SECRET_KEY?.trim();
+  if (!origin || !/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(origin) || !secret?.startsWith('sb_secret_')) {
+    return reply(503, { ok: false, error: 'Media publishing is not configured.' });
+  }
+  if (!request.headers.get('Content-Type')?.startsWith('multipart/form-data;')) {
+    return reply(415, { ok: false, error: 'Select an image file.' });
+  }
+
+  let form: FormData;
+  try {
+    const body = await readBody(request, MAX_IMAGE_BYTES + 16 * 1024);
+    form = await new Response(body, { headers: { 'Content-Type': request.headers.get('Content-Type')! } }).formData();
+  } catch (error) {
+    return reply(error instanceof RangeError ? 413 : 400, { ok: false, error: 'Choose a valid image of up to 5 MB.' });
+  }
+  const field = (name: string) => String(form.get(name) ?? '').trim();
+  const section = field('section');
+  const slot = field('slot');
+  const title = field('title');
+  const altText = field('altText');
+  const category = field('category');
+  const location = field('location');
+  const speed = field('speed');
+  const isProduct = section === 'processing_line' || section === 'equipment';
+  if (!['gallery', 'homepage_hero', 'processing_line', 'equipment'].includes(section)
+    || !title || title.length > 160 || altText.length > 240
+    || (isProduct && (!slot || slot.length > 160 || !/^[a-z0-9-]+$/.test(slot)))
+    || location.length > 160 || speed.length > 160
+    || (section === 'gallery' && !['processing-line', 'equipment', 'installation'].includes(category))) {
+    return reply(400, { ok: false, error: 'Check the image title and destination.' });
+  }
+  const file = form.get('image');
+  if (!(file instanceof File) || file.size <= 0 || file.size > MAX_IMAGE_BYTES || !extensions.has(file.type)
+    || !matchesImage(new Uint8Array(await file.slice(0, 12).arrayBuffer()), file.type)) {
+    return reply(400, { ok: false, error: 'Choose a JPEG, PNG, or WebP image up to 5 MB.' });
+  }
+
+  const id = crypto.randomUUID();
+  const path = `${section}/${id}.${extensions.get(file.type)}`;
+  try {
+    const upload = await fetch(`${origin}/storage/v1/object/website-media/${path}`, {
+      method: 'POST',
+      headers: { apikey: secret, 'Content-Type': file.type },
+      body: file,
+    });
+    if (!upload.ok) return reply(502, { ok: false, error: 'Image storage rejected the upload.' });
+
+    const record = await fetch(`${origin}/rest/v1/website_media`, {
+      method: 'POST',
+      headers: { apikey: secret, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        id, section, slot: isProduct ? slot : null, storage_path: path, title,
+        alt_text: altText || title, is_published: true,
+        metadata: section === 'gallery' ? { category, location, speed } : {},
+        display_order: isProduct || section === 'homepage_hero' ? -2147483648 : 0,
+      }),
+    });
+    if (!record.ok) return reply(502, { ok: false, error: 'The image uploaded, but publication could not be confirmed.' });
+    return reply(201, { ok: true, id });
+  } catch {
+    return reply(502, { ok: false, error: 'Publication could not be confirmed. Check the public page before retrying.' });
+  }
+}
+
+export async function handleAdminRequest(request: Request, url: URL, env: AdminEnvironment) {
+  const action = url.pathname.slice('/api/admin/'.length);
+  if (!['login', 'logout', 'session', 'media'].includes(action)) return reply(404, { ok: false });
+  const method = action === 'session' ? 'GET' : 'POST';
+  if (request.method !== method) return reply(405, { ok: false });
+  if (method === 'POST' && request.headers.get('Origin') !== url.origin) return reply(403, { ok: false });
+
+  if (action === 'logout') return reply(200, { ok: true }, sessionCookie('', 0));
+  if (!env.ADMIN_USERNAME || !/^[0-9a-f]{64}$/.test(env.ADMIN_PASSWORD_HASH || '')
+    || !/^[A-Za-z0-9_-]{43}$/.test(env.ADMIN_SESSION_SECRET || '') || !env.ADMIN_LOGIN_RATE_LIMITER) {
+    return reply(503, { ok: false, error: 'Admin access is not configured.' });
+  }
+  try {
+    const key = await signingKey(env.ADMIN_SESSION_SECRET!);
+    if (action === 'login') return await login(request, env, key);
+    if (!await verifyAdminSession(request, key)) return reply(401, { ok: false, error: 'Sign in again to continue.' });
+    if (action === 'session') return reply(200, { ok: true });
+    return await publishMedia(request, env);
+  } catch {
+    return reply(503, { ok: false, error: 'Admin service is temporarily unavailable.' });
+  }
+}
+
+===== END FILE =====
+
+===== FILE: worker/index.ts =====
+import { handleAdminRequest } from './admin';
+
+interface AssetsFetcher {
+  fetch(request: Request | string): Promise<Response>;
+}
+
+export interface Env {
+  ASSETS: AssetsFetcher;
+  ADMIN_USERNAME?: string;
+  ADMIN_PASSWORD_HASH?: string;
+  ADMIN_SESSION_SECRET?: string;
+  ADMIN_LOGIN_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
+  SUPABASE_SECRET_KEY?: string;
+  RESEND_API_KEY?: string;
+  ENQUIRY_FROM?: string;
+  ENQUIRY_TO?: string;
+  TURNSTILE_SECRET_KEY?: string;
+  TURNSTILE_SITE_KEY?: string;
+  SUPABASE_URL?: string;
+  SUPABASE_PUBLISHABLE_KEY?: string;
+}
+
+interface EnquiryPayload {
+  name?: unknown;
+  mobile?: unknown;
+  email?: unknown;
+  designation?: unknown;
+  description?: unknown;
+  website?: unknown;
+  turnstileToken?: unknown;
+}
+
+interface TurnstileVerifyResponse {
+  success?: boolean;
+  'error-codes'?: string[];
+}
+
+interface ResendSuccessResponse {
+  id?: string;
+}
+
+type MediaSection =
+  | 'homepage_showcase'
+  | 'homepage_hero'
+  | 'gallery'
+  | 'processing_line'
+  | 'equipment';
+
+interface SupabaseMediaRow {
+  id?: unknown;
+  section?: unknown;
+  slot?: unknown;
+  storage_path?: unknown;
+  title?: unknown;
+  alt_text?: unknown;
+  metadata?: unknown;
+  display_order?: unknown;
+  created_at?: unknown;
+}
+
+interface PublicMediaItem {
+  id: string;
+  section: MediaSection;
+  slot: string | null;
+  title: string;
+  altText: string;
+  imageUrl: string;
+  displayOrder: number;
+  category?: 'processing-line' | 'equipment' | 'installation';
+  location?: string;
+  speed?: string;
+  uploadedAt?: string;
+}
+
+const VALID_MEDIA_SECTIONS = new Set<MediaSection>([
+  'homepage_showcase',
+  'homepage_hero',
+  'gallery',
+  'processing_line',
+  'equipment',
+]);
+
+const VALID_GALLERY_CATEGORIES = new Set(['processing-line', 'equipment', 'installation']);
+const MEDIA_BUCKET = 'website-media';
+
+const MAX_BODY_BYTES = 16 * 1024;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const PHONE_ALLOWED_PATTERN = /^[+\d\s().-]+$/;
+
+const JSON_HEADERS: Record<string, string> = {
+  'Content-Type': 'application/json; charset=utf-8',
+  'Cache-Control': 'no-store',
+};
+
+function jsonResponse(body: Record<string, unknown>, status: number, extraHeaders?: Record<string, string>): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...JSON_HEADERS,
+      ...extraHeaders,
+    },
+  });
+}
+
+function sanitizeHeaderValue(value: string): string {
+  return value.replace(/[\r\n\0]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function parseRecipients(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((entry) => sanitizeHeaderValue(entry))
+    .filter((entry) => entry.length > 0);
+}
+
+function buildPublicStorageUrl(supabaseOrigin: string, storagePath: string): string | null {
+  const trimmed = storagePath.trim();
+  if (!trimmed || trimmed.startsWith('/') || /^https?:\/\//i.test(trimmed) || trimmed.includes('..')) {
+    return null;
+  }
+
+  const segments = trimmed.split('/').filter((segment) => segment.length > 0);
+  if (segments.length === 0) {
+    return null;
+  }
+
+  const encodedPath = segments.map((segment) => encodeURIComponent(segment)).join('/');
+  return `${supabaseOrigin}/storage/v1/object/public/${MEDIA_BUCKET}/${encodedPath}`;
+}
+
+function isLegacyJwtKey(key: string): boolean {
+  return key.startsWith('eyJ') && key.split('.').length === 3;
+}
+
+async function handleMediaGet(request: Request, env: Env): Promise<Response> {
+  const rawSupabaseUrl = env.SUPABASE_URL?.trim() || '';
+  const publishableKey = env.SUPABASE_PUBLISHABLE_KEY?.trim() || '';
+
+  if (!rawSupabaseUrl || !publishableKey) {
+    return jsonResponse(
+      {
+        ok: false,
+        configured: false,
+        items: [],
+        error: 'Published media service is not configured yet.',
+      },
+      503
+    );
+  }
+
+  let supabaseOrigin: string;
+  try {
+    const parsedUrl = new URL(rawSupabaseUrl);
+    if (parsedUrl.protocol !== 'https:') {
+      return jsonResponse({ ok: false, items: [], error: 'Invalid media service URL.' }, 500);
+    }
+    supabaseOrigin = parsedUrl.origin;
+  } catch {
+    return jsonResponse({ ok: false, items: [], error: 'Invalid media service URL.' }, 500);
+  }
+
+  const requestUrl = new URL(request.url);
+  const requestedSection = requestUrl.searchParams.get('section')?.trim() || '';
+  if (requestedSection && !VALID_MEDIA_SECTIONS.has(requestedSection as MediaSection)) {
+    return jsonResponse({ ok: false, items: [], error: 'Invalid media section filter.' }, 400);
+  }
+
+  const queryParams = new URLSearchParams({
+    select: 'id,section,slot,storage_path,title,alt_text,metadata,display_order,created_at',
+    is_published: 'eq.true',
+    order: 'display_order.asc,created_at.desc',
+  });
+
+  if (requestedSection) {
+    queryParams.set('section', `eq.${requestedSection}`);
+  }
+
+  const headers: Record<string, string> = {
+    apikey: publishableKey,
+    Accept: 'application/json',
+  };
+
+  // Support both modern Supabase `sb_publishable_*` keys (apikey header only)
+  // and legacy JWT `anon` keys (apikey + Authorization Bearer).
+  if (isLegacyJwtKey(publishableKey)) {
+    headers.Authorization = `Bearer ${publishableKey}`;
+  }
+
+  try {
+    const supabaseRes = await fetch(`${supabaseOrigin}/rest/v1/website_media?${queryParams.toString()}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!supabaseRes.ok) {
+      console.error(`Supabase media query failed with status ${supabaseRes.status}`);
+      return jsonResponse(
+        { ok: false, items: [], error: 'Unable to load published media right now.' },
+        502
+      );
+    }
+
+    const rawRows = (await supabaseRes.json().catch(() => null)) as unknown;
+    if (!Array.isArray(rawRows)) {
+      return jsonResponse({ ok: true, items: [] }, 200, {
+        'Cache-Control': 'public, max-age=60, s-maxage=60',
+      });
+    }
+
+    const items: PublicMediaItem[] = [];
+
+    for (const rawRow of rawRows) {
+      if (!rawRow || typeof rawRow !== 'object') continue;
+      const row = rawRow as SupabaseMediaRow;
+
+      if (typeof row.id !== 'string' || typeof row.section !== 'string' || typeof row.storage_path !== 'string') {
+        continue;
+      }
+
+      if (!VALID_MEDIA_SECTIONS.has(row.section as MediaSection)) {
+        continue;
+      }
+
+      const imageUrl = buildPublicStorageUrl(supabaseOrigin, row.storage_path);
+      if (!imageUrl) {
+        continue;
+      }
+
+      const title = typeof row.title === 'string' && row.title.trim().length > 0 ? row.title.trim() : '';
+      if (!title) {
+        continue;
+      }
+
+      const altText =
+        typeof row.alt_text === 'string' && row.alt_text.trim().length > 0 ? row.alt_text.trim() : title;
+      const slot = typeof row.slot === 'string' && row.slot.trim().length > 0 ? row.slot.trim() : null;
+      const displayOrder = typeof row.display_order === 'number' && Number.isFinite(row.display_order) ? row.display_order : 0;
+
+      const meta =
+        row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+          ? (row.metadata as Record<string, unknown>)
+          : {};
+
+      const item: PublicMediaItem = {
+        id: row.id,
+        section: row.section as MediaSection,
+        slot,
+        title,
+        altText,
+        imageUrl,
+        displayOrder,
+      };
+
+      const rawCategory =
+        typeof meta.category === 'string' && VALID_GALLERY_CATEGORIES.has(meta.category)
+          ? (meta.category as 'processing-line' | 'equipment' | 'installation')
+          : slot && VALID_GALLERY_CATEGORIES.has(slot)
+            ? (slot as 'processing-line' | 'equipment' | 'installation')
+            : undefined;
+      if (rawCategory) {
+        item.category = rawCategory;
+      }
+
+      if (typeof meta.location === 'string' && meta.location.trim()) {
+        item.location = meta.location.trim();
+      }
+
+      if (typeof meta.speed === 'string' && meta.speed.trim()) {
+        item.speed = meta.speed.trim();
+      }
+
+      if (typeof row.created_at === 'string' && row.created_at.length >= 10) {
+        item.uploadedAt = row.created_at.slice(0, 10);
+      }
+
+      items.push(item);
+    }
+
+    return jsonResponse(
+      { ok: true, items },
+      200,
+      { 'Cache-Control': 'public, max-age=60, s-maxage=60' }
+    );
+  } catch {
+    console.error('Supabase media network request failed');
+    return jsonResponse(
+      { ok: false, items: [], error: 'Unable to reach the published media service.' },
+      502
+    );
+  }
+}
+
+function validateEnquiry(payload: EnquiryPayload): {
+  valid: boolean;
+  error?: string;
+  data?: {
+    name: string;
+    mobile: string;
+    email: string;
+    designation: string;
+    description: string;
+    turnstileToken: string;
+  };
+} {
+  if (typeof payload.website === 'string' && payload.website.trim().length > 0) {
+    return { valid: false, error: 'Invalid enquiry submission.' };
+  }
+
+  const name = typeof payload.name === 'string' ? sanitizeHeaderValue(payload.name) : '';
+  const mobile = typeof payload.mobile === 'string' ? sanitizeHeaderValue(payload.mobile) : '';
+  const email = typeof payload.email === 'string' ? sanitizeHeaderValue(payload.email).toLowerCase() : '';
+  const designation = typeof payload.designation === 'string' ? sanitizeHeaderValue(payload.designation) : '';
+  const description = typeof payload.description === 'string' ? payload.description.replace(/\0/g, '').trim() : '';
+  const turnstileToken = typeof payload.turnstileToken === 'string' ? payload.turnstileToken.trim() : '';
+
+  if (name.length < 2 || name.length > 120) {
+    return { valid: false, error: 'Please enter a valid full name (2 to 120 characters).' };
+  }
+
+  const digitCount = mobile.replace(/\D/g, '').length;
+  if (mobile.length < 7 || mobile.length > 30 || !PHONE_ALLOWED_PATTERN.test(mobile) || digitCount < 7) {
+    return { valid: false, error: 'Please enter a valid mobile or phone number.' };
+  }
+
+  if (email.length > 254 || !EMAIL_PATTERN.test(email)) {
+    return { valid: false, error: 'Please enter a valid email address.' };
+  }
+
+  if (designation.length > 120) {
+    return { valid: false, error: 'Designation must be 120 characters or fewer.' };
+  }
+
+  if (description.length < 10 || description.length > 5000) {
+    return { valid: false, error: 'Please describe your enquiry in detail (at least 10 characters).' };
+  }
+
+  return {
+    valid: true,
+    data: {
+      name,
+      mobile,
+      email,
+      designation,
+      description,
+      turnstileToken,
+    },
+  };
+}
+
+async function verifyTurnstile(secretKey: string, token: string, remoteIp: string | null): Promise<boolean> {
+  const formBody = new URLSearchParams();
+  formBody.set('secret', secretKey);
+  formBody.set('response', token);
+  if (remoteIp) {
+    formBody.set('remoteip', remoteIp);
+  }
+
+  const verifyRes = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formBody.toString(),
+  });
+
+  if (!verifyRes.ok) {
+    return false;
+  }
+
+  const data = (await verifyRes.json()) as TurnstileVerifyResponse;
+  return data.success === true;
+}
+
+async function handleEnquiryPost(request: Request, env: Env): Promise<Response> {
+  const resendApiKey = env.RESEND_API_KEY?.trim() || '';
+  const enquiryFrom = env.ENQUIRY_FROM ? sanitizeHeaderValue(env.ENQUIRY_FROM) : '';
+  const enquiryToRaw = env.ENQUIRY_TO?.trim() || '';
+  const recipients = parseRecipients(enquiryToRaw);
+
+  if (!resendApiKey || !enquiryFrom || recipients.length === 0) {
+    return jsonResponse(
+      {
+        ok: false,
+        error: 'Enquiry email service is not configured yet. Please contact us directly by phone or email.',
+      },
+      503
+    );
+  }
+
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    return jsonResponse({ ok: false, error: 'Request body must be JSON.' }, 415);
+  }
+
+  let rawBody = '';
+  try {
+    rawBody = await request.text();
+  } catch {
+    return jsonResponse({ ok: false, error: 'Unable to read request body.' }, 400);
+  }
+
+  if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
+    return jsonResponse({ ok: false, error: 'Enquiry payload is too large.' }, 413);
+  }
+
+  let parsedBody: unknown;
+  try {
+    parsedBody = JSON.parse(rawBody);
+  } catch {
+    return jsonResponse({ ok: false, error: 'Invalid JSON request body.' }, 400);
+  }
+
+  if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+    return jsonResponse({ ok: false, error: 'Invalid enquiry payload.' }, 400);
+  }
+
+  const validation = validateEnquiry(parsedBody as EnquiryPayload);
+  if (!validation.valid || !validation.data) {
+    return jsonResponse({ ok: false, error: validation.error || 'Please check the form fields and try again.' }, 400);
+  }
+
+  const { name, mobile, email, designation, description, turnstileToken } = validation.data;
+
+  const turnstileSecret = env.TURNSTILE_SECRET_KEY?.trim() || '';
+  if (turnstileSecret) {
+    if (!turnstileToken) {
+      return jsonResponse({ ok: false, error: 'Please complete the security verification challenge.' }, 400);
+    }
+
+    try {
+      const remoteIp = request.headers.get('CF-Connecting-IP');
+      const verified = await verifyTurnstile(turnstileSecret, turnstileToken, remoteIp);
+      if (!verified) {
+        return jsonResponse(
+          { ok: false, error: 'Security verification failed. Please retry the verification check.' },
+          403
+        );
+      }
+    } catch {
+      return jsonResponse(
+        { ok: false, error: 'Unable to verify the security challenge right now. Please try again.' },
+        502
+      );
+    }
+  }
+
+  const submittedAt = new Date().toISOString();
+  const subject = `Website Enquiry — ${name}`;
+
+  const textLines = [
+    'New enquiry submitted via the Shivansh Engineering website.',
+    '',
+    `Name: ${name}`,
+    `Mobile Number: ${mobile}`,
+    `Email: ${email}`,
+    `Designation: ${designation || 'Not specified'}`,
+    `Submitted At (UTC): ${submittedAt}`,
+    '',
+    'Description:',
+    description,
+  ];
+
+  const htmlBody = `<!doctype html>
+<html lang="en">
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; color: #29434F; background-color: #F5F1E9; margin: 0; padding: 24px;">
+    <div style="max-width: 640px; margin: 0 auto; background-color: #FFFCF6; border: 1px solid #DDD4C6; border-radius: 12px; padding: 24px;">
+      <h2 style="margin: 0 0 16px; color: #29434F; font-size: 20px;">New Website Enquiry</h2>
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
+        <tr>
+          <td style="padding: 8px 0; border-bottom: 1px solid #DDD4C6; font-weight: 600; width: 150px;">Name</td>
+          <td style="padding: 8px 0; border-bottom: 1px solid #DDD4C6;">${escapeHtml(name)}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; border-bottom: 1px solid #DDD4C6; font-weight: 600;">Mobile Number</td>
+          <td style="padding: 8px 0; border-bottom: 1px solid #DDD4C6;">${escapeHtml(mobile)}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; border-bottom: 1px solid #DDD4C6; font-weight: 600;">Email</td>
+          <td style="padding: 8px 0; border-bottom: 1px solid #DDD4C6;">${escapeHtml(email)}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; border-bottom: 1px solid #DDD4C6; font-weight: 600;">Designation</td>
+          <td style="padding: 8px 0; border-bottom: 1px solid #DDD4C6;">${escapeHtml(designation || 'Not specified')}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; border-bottom: 1px solid #DDD4C6; font-weight: 600;">Submitted (UTC)</td>
+          <td style="padding: 8px 0; border-bottom: 1px solid #DDD4C6;">${escapeHtml(submittedAt)}</td>
+        </tr>
+      </table>
+      <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px;">Enquiry Details</div>
+      <div style="font-size: 14px; line-height: 1.6; white-space: pre-wrap; background-color: #F5F1E9; border: 1px solid #DDD4C6; border-radius: 8px; padding: 14px;">${escapeHtml(description)}</div>
+    </div>
+  </body>
+</html>`;
+
+  try {
+    const resendResponse = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: enquiryFrom,
+        to: recipients,
+        reply_to: email,
+        subject,
+        text: textLines.join('\n'),
+        html: htmlBody,
+      }),
+    });
+
+    if (!resendResponse.ok) {
+      console.error(`Resend API rejected enquiry request with status ${resendResponse.status}`);
+      return jsonResponse(
+        {
+          ok: false,
+          error: 'Unable to send your enquiry right now. Please try again later or contact us directly.',
+        },
+        502
+      );
+    }
+
+    const resendData = (await resendResponse.json().catch(() => null)) as ResendSuccessResponse | null;
+    if (!resendData?.id) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: 'Email delivery could not be confirmed. Please try again or contact us directly.',
+        },
+        502
+      );
+    }
+
+    return jsonResponse({ ok: true, id: resendData.id }, 200);
+  } catch {
+    console.error('Resend API network request failed');
+    return jsonResponse(
+      {
+        ok: false,
+        error: 'Unable to reach the email service right now. Please try again later or contact us directly.',
+      },
+      502
+    );
+  }
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (url.pathname.startsWith('/api/admin/')) {
+      return handleAdminRequest(request, url, env);
+    }
+
+    if (url.pathname === '/api/media') {
+      if (request.method !== 'GET') {
+        return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405, { Allow: 'GET' });
+      }
+      return handleMediaGet(request, env);
+    }
+
+    if (url.pathname === '/api/enquiry/config') {
+      if (request.method !== 'GET') {
+        return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405, { Allow: 'GET' });
+      }
+      const turnstileSiteKey = env.TURNSTILE_SITE_KEY?.trim() || null;
+      return jsonResponse({ ok: true, turnstileSiteKey }, 200);
+    }
+
+    if (url.pathname === '/api/enquiry') {
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { status: 204, headers: { Allow: 'POST, OPTIONS' } });
+      }
+      if (request.method !== 'POST') {
+        return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405, { Allow: 'POST' });
+      }
+      return handleEnquiryPost(request, env);
+    }
+
+    if (url.pathname.startsWith('/api/')) {
+      return jsonResponse({ ok: false, error: 'API endpoint not found.' }, 404);
+    }
+
+    return env.ASSETS.fetch(request);
+  },
+};
+
+===== END FILE =====
+
+===== FILE: wrangler.jsonc =====
+{
+  // Keep the exact Worker name. Existing custom domains configured in the
+  // Cloudflare Dashboard are preserved by omitting the `routes` field.
+  "name": "shivansh-engineering-app",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-10-01",
+  "workers_dev": true,
+  "keep_vars": true,
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "vars": {
+    "ENQUIRY_FROM": "Shivansh Website <enquiries@shivanshengg.com>",
+    "ENQUIRY_TO": "shivanshengineering@yahoo.in"
+  },
+  "ratelimits": [
+    {
+      "name": "ADMIN_LOGIN_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": {
+        "limit": 5,
+        "period": 60
+      }
+    }
+  ]
+}
+
+===== END FILE =====
+

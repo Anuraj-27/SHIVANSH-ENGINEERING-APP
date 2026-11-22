@@ -13,7 +13,7 @@ export const GalleryPage: React.FC = () => {
   const { items: publishedMedia } = usePublishedMedia();
   const publishedGallery = getPublishedGalleryPhotos(publishedMedia);
   const galleryItems: PublishedGalleryPhoto[] =
-    publishedGallery.length > 0 ? publishedGallery : DEFAULT_GALLERY;
+    [...publishedGallery, ...DEFAULT_GALLERY];
 
   const [activeTab, setActiveTab] = useState<'all' | 'processing-line' | 'equipment'>('all');
   const [selectedPhoto, setSelectedPhoto] = useState<PublishedGalleryPhoto | null>(null);

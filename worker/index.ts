@@ -1,9 +1,16 @@
+import { handleAdminRequest } from './admin';
+
 interface AssetsFetcher {
   fetch(request: Request | string): Promise<Response>;
 }
 
 export interface Env {
   ASSETS: AssetsFetcher;
+  ADMIN_USERNAME?: string;
+  ADMIN_PASSWORD_HASH?: string;
+  ADMIN_SESSION_SECRET?: string;
+  ADMIN_LOGIN_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
+  SUPABASE_SECRET_KEY?: string;
   RESEND_API_KEY?: string;
   ENQUIRY_FROM?: string;
   ENQUIRY_TO?: string;
@@ -548,6 +555,10 @@ async function handleEnquiryPost(request: Request, env: Env): Promise<Response> 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname.startsWith('/api/admin/')) {
+      return handleAdminRequest(request, url, env);
+    }
 
     if (url.pathname === '/api/media') {
       if (request.method !== 'GET') {

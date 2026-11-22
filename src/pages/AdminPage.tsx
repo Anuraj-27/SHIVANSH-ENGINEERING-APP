@@ -16,6 +16,7 @@ import {
   ArrowDown,
   Sparkles,
 } from 'lucide-react';
+import { AdminMediaPublisher } from '../components/AdminMediaPublisher';
 import { useRouter } from '../router/Router';
 import {
   getStoredGallery,
@@ -36,15 +37,20 @@ import {
 import { PROCESSING_LINES } from '../data/processingLinesData';
 import { EQUIPMENTS_LIST } from './EquipmentsPage';
 
-const AUTH_KEY = 'shivansh_admin_auth_token';
-
 export const AdminPage: React.FC = () => {
   const { navigate } = useRouter();
 
   // Authentication State
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem(AUTH_KEY) === 'true';
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authPending, setAuthPending] = useState(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/admin/session', { cache: 'no-store', signal: controller.signal })
+      .then((response) => setIsAuthenticated(response.ok))
+      .catch(() => undefined)
+      .finally(() => { if (!controller.signal.aborted) setAuthPending(false); });
+    return () => controller.abort();
+  }, []);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
@@ -99,22 +105,41 @@ export const AdminPage: React.FC = () => {
     return () => window.removeEventListener('shivansh-media-updated', handleSync);
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (username.trim() === 'shivansh' && password === 'SMK@12345') {
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (authPending) return;
+    setAuthPending(true);
+    setAuthError('');
+    try {
+      const response = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        setAuthError(data.error || 'Could not sign in.');
+        return;
+      }
+      setPassword('');
       setIsAuthenticated(true);
-      localStorage.setItem(AUTH_KEY, 'true');
-      setAuthError('');
-    } else {
-      setAuthError('Invalid credentials. Please enter username: shivansh and assigned password.');
+    } catch {
+      setAuthError('Could not reach the admin service.');
+    } finally {
+      setAuthPending(false);
     }
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    localStorage.removeItem(AUTH_KEY);
-    setUsername('');
-    setPassword('');
+  const handleLogout = async () => {
+    setAuthError('');
+    try {
+      const response = await fetch('/api/admin/logout', { method: 'POST' });
+      if (!response.ok) throw new Error('Logout failed');
+      setIsAuthenticated(false);
+      setUsername('');
+    } catch {
+      setAuthError('Could not sign out. Please try again.');
+    }
   };
 
   const showNotification = (msg: string) => {
@@ -388,6 +413,7 @@ export const AdminPage: React.FC = () => {
 
             <button
               type="submit"
+              disabled={authPending}
               className="w-full py-3.5 px-4 text-sm font-semibold text-ivory bg-ink hover:bg-ink-hover rounded-xl transition-colors duration-150 shadow-soft-diffused mt-2"
             >
               Sign In to Console
@@ -422,10 +448,10 @@ export const AdminPage: React.FC = () => {
               </span>
             </div>
             <h1 className="font-display font-normal text-3xl sm:text-4xl text-ink tracking-normal">
-              Website Media Console (Browser-Only Local Controls)
+              Website Media Console
             </h1>
             <p className="text-sm text-ink mt-1">
-              Changes made here are saved in this browser only and are not published live. Public site media is served read-only from Supabase (website_media / website-media).
+              Use the publish form to put photos on the live website.
             </p>
           </div>
 
@@ -448,12 +474,18 @@ export const AdminPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Phase 1 Browser-Only Storage Notice */}
+        {authError && <p role="alert" className="mb-4 text-ink">{authError}</p>}
+        <AdminMediaPublisher onSessionExpired={() => {
+          setIsAuthenticated(false);
+          setAuthError('Your session expired. Sign in again to publish.');
+        }} />
+
+        {/* Browser-only previews */}
         <div className="mb-6 p-4 rounded-2xl bg-terracotta/12 border border-terracotta text-ink text-sm flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-terracotta shrink-0 mt-0.5" />
           <div>
-            <strong className="font-semibold">Browser-Only Controls (Phase 1):</strong>{' '}
-            Public visitors now see published media loaded from Supabase. Uploads, reorders, and removals below save only to this browser&apos;s local storage and do not publish to live visitors. To publish live images in Phase 1, upload files to the <code className="font-semibold">website-media</code> bucket and insert a published row into <code className="font-semibold">website_media</code> in the Supabase Dashboard.
+            <strong className="font-semibold">Browser-only controls:</strong>{' '}
+            The controls below keep earlier local edits available in this browser. Use the publish form above for live changes.
           </div>
         </div>
 
