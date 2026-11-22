@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Cog, ArrowRight, Eye } from 'lucide-react';
 import { useRouter } from '../router/Router';
-import { getStoredEquipmentsMedia, EquipmentMedia } from '../services/mediaStore';
+import { usePublishedMedia, getPublishedEquipmentImage } from '../services/publishedMedia';
 
 export const EQUIPMENTS_LIST = [
   'Sink Roll Scraper',
@@ -37,15 +37,7 @@ export const EQUIPMENTS_LIST = [
 
 export const EquipmentsPage: React.FC = () => {
   const { navigate } = useRouter();
-  const [equipmentsMedia, setEquipmentsMedia] = useState<EquipmentMedia>(getStoredEquipmentsMedia());
-
-  useEffect(() => {
-    const handleSync = () => {
-      setEquipmentsMedia(getStoredEquipmentsMedia());
-    };
-    window.addEventListener('shivansh-media-updated', handleSync);
-    return () => window.removeEventListener('shivansh-media-updated', handleSync);
-  }, []);
+  const { items: publishedMedia } = usePublishedMedia();
 
   return (
     <div className="bg-canvas min-h-[80vh] py-16 border-b border-border relative font-sans">
@@ -80,7 +72,7 @@ export const EquipmentsPage: React.FC = () => {
         {/* 4 Items Per Row Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5 mb-16">
           {EQUIPMENTS_LIST.map((name, idx) => {
-            const photoUrl = equipmentsMedia[name]?.imageUrl;
+            const publishedPhoto = getPublishedEquipmentImage(publishedMedia, name);
             return (
               <div
                 key={idx}
@@ -91,11 +83,11 @@ export const EquipmentsPage: React.FC = () => {
                   #{String(idx + 1).padStart(2, '0')}
                 </div>
 
-                {photoUrl ? (
+                {publishedPhoto ? (
                   <div className="w-full aspect-[16/10] rounded-xl overflow-hidden mb-3 border border-border bg-canvas relative">
                     <img
-                      src={photoUrl}
-                      alt={name}
+                      src={publishedPhoto.imageUrl}
+                      alt={publishedPhoto.altText}
                       className="w-full h-full object-cover"
                     />
                     <div className="absolute inset-0 bg-ink/35 opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center justify-center">

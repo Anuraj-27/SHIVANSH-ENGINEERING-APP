@@ -29,7 +29,6 @@ export interface LandingShowcaseImage {
 }
 
 export const STORAGE_KEYS = {
-  AUTH: 'shivansh_admin_authenticated',
   GALLERY: 'shivansh_gallery_media',
   PROCESSING_LINES: 'shivansh_processing_lines_media',
   EQUIPMENTS: 'shivansh_equipments_media',

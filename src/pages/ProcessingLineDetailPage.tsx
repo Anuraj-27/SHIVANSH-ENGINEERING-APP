@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowRight, ChevronRight, FileCheck } from 'lucide-react';
 import { useRouter } from '../router/Router';
 import { ProcessingLineItem } from '../data/processingLinesData';
-import { getStoredProcessingLinesMedia } from '../services/mediaStore';
+import { usePublishedMedia, getPublishedProcessingLineImage } from '../services/publishedMedia';
 
 interface Props {
   line: ProcessingLineItem;
@@ -10,20 +10,17 @@ interface Props {
 
 export const ProcessingLineDetailPage: React.FC<Props> = ({ line }) => {
   const { navigate } = useRouter();
-  const [customPhoto, setCustomPhoto] = useState<string | null>(
-    getStoredProcessingLinesMedia()[line.slug]?.mainImage || null
-  );
+  const { items: publishedMedia } = usePublishedMedia();
+  const publishedPhoto = getPublishedProcessingLineImage(publishedMedia, line.slug);
+  const [remoteFailed, setRemoteFailed] = useState(false);
 
   useEffect(() => {
-    const handleSync = () => {
-      const media = getStoredProcessingLinesMedia();
-      setCustomPhoto(media[line.slug]?.mainImage || null);
-    };
-    window.addEventListener('shivansh-media-updated', handleSync);
-    return () => window.removeEventListener('shivansh-media-updated', handleSync);
-  }, [line.slug]);
+    setRemoteFailed(false);
+  }, [line.slug, publishedPhoto?.imageUrl]);
 
-  const activeImage = customPhoto || line.image;
+  const usingRemote = Boolean(publishedPhoto && !remoteFailed);
+  const activeImage = usingRemote && publishedPhoto ? publishedPhoto.imageUrl : line.image;
+  const activeAlt = usingRemote && publishedPhoto ? publishedPhoto.altText : line.imageAlt;
 
   return (
     <div className="bg-canvas min-h-[85vh] py-12 sm:py-16 border-b border-border relative font-sans">
@@ -69,11 +66,14 @@ export const ProcessingLineDetailPage: React.FC<Props> = ({ line }) => {
               <div className="relative rounded-2xl overflow-hidden border border-border bg-canvas aspect-[4/3]">
                 <img
                   src={activeImage}
-                  alt={line.imageAlt}
+                  alt={activeAlt}
+                  onError={() => {
+                    if (usingRemote) setRemoteFailed(true);
+                  }}
                   className="w-full h-full object-cover object-center"
                 />
                 <div className="absolute bottom-3 left-3 bg-ink text-ivory px-3 py-1 rounded-lg text-xs font-sans font-medium uppercase tracking-[0.08em]">
-                  {customPhoto ? 'Verified Field Photograph' : 'Shivansh OEM Assembly'}
+                  {usingRemote ? 'Published OEM Photograph' : 'Shivansh OEM Assembly'}
                 </div>
               </div>
             </div>

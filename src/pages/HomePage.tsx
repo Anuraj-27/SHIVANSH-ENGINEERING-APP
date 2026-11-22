@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, RoutePath } from '../router/Router';
+import { usePublishedMedia, getPublishedHomepageHero } from '../services/publishedMedia';
 
 interface QuickLinkItem {
   label: string;
@@ -13,10 +14,31 @@ const QUICK_LINKS: QuickLinkItem[] = [
   { label: 'Project Gallery', href: '/gallery' },
 ];
 
-const HERO_IMAGE_PATH = '/shivansh-home-hero.png';
+const DEFAULT_HERO_IMAGE_PATH = '/shivansh-home-hero.png';
+const DEFAULT_HERO_ALT = 'Rolling mill and steel coil strip processing equipment';
 
 export const HomePage: React.FC = () => {
-  const [imageError, setImageError] = useState(false);
+  const { items: publishedMedia } = usePublishedMedia();
+  const publishedHero = getPublishedHomepageHero(publishedMedia);
+
+  const [remoteFailed, setRemoteFailed] = useState(false);
+  const [fallbackFailed, setFallbackFailed] = useState(false);
+
+  useEffect(() => {
+    setRemoteFailed(false);
+  }, [publishedHero?.imageUrl]);
+
+  const usingRemote = Boolean(publishedHero && !remoteFailed);
+  const activeHeroImage = usingRemote && publishedHero ? publishedHero.imageUrl : DEFAULT_HERO_IMAGE_PATH;
+  const activeHeroAlt = usingRemote && publishedHero ? publishedHero.altText : DEFAULT_HERO_ALT;
+
+  const handleImageError = () => {
+    if (usingRemote) {
+      setRemoteFailed(true);
+    } else {
+      setFallbackFailed(true);
+    }
+  };
 
   return (
     <div className="w-full overflow-x-clip bg-canvas font-sans">
@@ -27,12 +49,12 @@ export const HomePage: React.FC = () => {
       >
         {/* Mobile Top Photo Panel (prevents text from covering the machinery on narrow screens) */}
         <div className="relative w-full h-56 sm:h-72 md:hidden overflow-hidden bg-ink">
-          {!imageError && (
+          {!fallbackFailed && (
             <img
-              src={HERO_IMAGE_PATH}
-              alt="Rolling mill and steel coil strip processing equipment"
+              src={activeHeroImage}
+              alt={activeHeroAlt}
               referrerPolicy="no-referrer"
-              onError={() => setImageError(true)}
+              onError={handleImageError}
               className="w-full h-full object-cover object-right"
             />
           )}
@@ -46,12 +68,12 @@ export const HomePage: React.FC = () => {
         <div className="relative md:min-h-[520px] lg:h-[calc(100vh-9.25rem)] lg:min-h-[540px] lg:max-h-[760px] flex items-center">
           {/* Edge-to-Edge Machinery Photograph (Desktop / Tablet) */}
           <div className="hidden md:block absolute inset-0 overflow-hidden bg-ink">
-            {!imageError && (
+            {!fallbackFailed && (
               <img
-                src={HERO_IMAGE_PATH}
-                alt="Rolling mill and steel coil strip processing equipment"
+                src={activeHeroImage}
+                alt={activeHeroAlt}
                 referrerPolicy="no-referrer"
-                onError={() => setImageError(true)}
+                onError={handleImageError}
                 className="w-full h-full object-cover object-right"
               />
             )}

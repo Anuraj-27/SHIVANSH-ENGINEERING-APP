@@ -1,21 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Image as ImageIcon, MapPin, X, Eye } from 'lucide-react';
-import { getStoredGallery, GalleryPhoto } from '../services/mediaStore';
+import { DEFAULT_GALLERY } from '../services/mediaStore';
+import {
+  usePublishedMedia,
+  getPublishedGalleryPhotos,
+  PublishedGalleryPhoto,
+} from '../services/publishedMedia';
 import { useRouter } from '../router/Router';
 
 export const GalleryPage: React.FC = () => {
   const { navigate } = useRouter();
-  const [galleryItems, setGalleryItems] = useState<GalleryPhoto[]>(getStoredGallery());
-  const [activeTab, setActiveTab] = useState<'all' | 'processing-line' | 'equipment'>('all');
-  const [selectedPhoto, setSelectedPhoto] = useState<GalleryPhoto | null>(null);
+  const { items: publishedMedia } = usePublishedMedia();
+  const publishedGallery = getPublishedGalleryPhotos(publishedMedia);
+  const galleryItems: PublishedGalleryPhoto[] =
+    publishedGallery.length > 0 ? publishedGallery : DEFAULT_GALLERY;
 
-  useEffect(() => {
-    const handleSync = () => {
-      setGalleryItems(getStoredGallery());
-    };
-    window.addEventListener('shivansh-media-updated', handleSync);
-    return () => window.removeEventListener('shivansh-media-updated', handleSync);
-  }, []);
+  const [activeTab, setActiveTab] = useState<'all' | 'processing-line' | 'equipment'>('all');
+  const [selectedPhoto, setSelectedPhoto] = useState<PublishedGalleryPhoto | null>(null);
 
   const filteredItems =
     activeTab === 'all'
@@ -97,7 +98,14 @@ export const GalleryPage: React.FC = () => {
                 <div className="relative aspect-[16/10] bg-canvas overflow-hidden">
                   <img
                     src={item.imageUrl}
-                    alt={item.title}
+                    alt={item.altText || item.title}
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      const fallback = `${window.location.origin}/slitting-line-factory.png`;
+                      if (target.src !== fallback) {
+                        target.src = '/slitting-line-factory.png';
+                      }
+                    }}
                     className="w-full h-full object-cover"
                   />
                   <div className="absolute inset-0 bg-ink/40 opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center justify-center">
@@ -185,7 +193,14 @@ export const GalleryPage: React.FC = () => {
               <div className="aspect-[16/10] bg-canvas rounded-xl overflow-hidden border border-border mb-5">
                 <img
                   src={selectedPhoto.imageUrl}
-                  alt={selectedPhoto.title}
+                  alt={selectedPhoto.altText || selectedPhoto.title}
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    const fallback = `${window.location.origin}/slitting-line-factory.png`;
+                    if (target.src !== fallback) {
+                      target.src = '/slitting-line-factory.png';
+                    }
+                  }}
                   className="w-full h-full object-contain bg-ink"
                 />
               </div>

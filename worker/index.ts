@@ -9,6 +9,8 @@ export interface Env {
   ENQUIRY_TO?: string;
   TURNSTILE_SECRET_KEY?: string;
   TURNSTILE_SITE_KEY?: string;
+  SUPABASE_URL?: string;
+  SUPABASE_PUBLISHABLE_KEY?: string;
 }
 
 interface EnquiryPayload {
@@ -29,6 +31,50 @@ interface TurnstileVerifyResponse {
 interface ResendSuccessResponse {
   id?: string;
 }
+
+type MediaSection =
+  | 'homepage_showcase'
+  | 'homepage_hero'
+  | 'gallery'
+  | 'processing_line'
+  | 'equipment';
+
+interface SupabaseMediaRow {
+  id?: unknown;
+  section?: unknown;
+  slot?: unknown;
+  storage_path?: unknown;
+  title?: unknown;
+  alt_text?: unknown;
+  metadata?: unknown;
+  display_order?: unknown;
+  created_at?: unknown;
+}
+
+interface PublicMediaItem {
+  id: string;
+  section: MediaSection;
+  slot: string | null;
+  title: string;
+  altText: string;
+  imageUrl: string;
+  displayOrder: number;
+  category?: 'processing-line' | 'equipment' | 'installation';
+  location?: string;
+  speed?: string;
+  uploadedAt?: string;
+}
+
+const VALID_MEDIA_SECTIONS = new Set<MediaSection>([
+  'homepage_showcase',
+  'homepage_hero',
+  'gallery',
+  'processing_line',
+  'equipment',
+]);
+
+const VALID_GALLERY_CATEGORIES = new Set(['processing-line', 'equipment', 'installation']);
+const MEDIA_BUCKET = 'website-media';
 
 const MAX_BODY_BYTES = 16 * 1024;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -67,6 +113,183 @@ function parseRecipients(raw: string): string[] {
     .split(',')
     .map((entry) => sanitizeHeaderValue(entry))
     .filter((entry) => entry.length > 0);
+}
+
+function buildPublicStorageUrl(supabaseOrigin: string, storagePath: string): string | null {
+  const trimmed = storagePath.trim();
+  if (!trimmed || trimmed.startsWith('/') || /^https?:\/\//i.test(trimmed) || trimmed.includes('..')) {
+    return null;
+  }
+
+  const segments = trimmed.split('/').filter((segment) => segment.length > 0);
+  if (segments.length === 0) {
+    return null;
+  }
+
+  const encodedPath = segments.map((segment) => encodeURIComponent(segment)).join('/');
+  return `${supabaseOrigin}/storage/v1/object/public/${MEDIA_BUCKET}/${encodedPath}`;
+}
+
+function isLegacyJwtKey(key: string): boolean {
+  return key.startsWith('eyJ') && key.split('.').length === 3;
+}
+
+async function handleMediaGet(request: Request, env: Env): Promise<Response> {
+  const rawSupabaseUrl = env.SUPABASE_URL?.trim() || '';
+  const publishableKey = env.SUPABASE_PUBLISHABLE_KEY?.trim() || '';
+
+  if (!rawSupabaseUrl || !publishableKey) {
+    return jsonResponse(
+      {
+        ok: false,
+        configured: false,
+        items: [],
+        error: 'Published media service is not configured yet.',
+      },
+      503
+    );
+  }
+
+  let supabaseOrigin: string;
+  try {
+    const parsedUrl = new URL(rawSupabaseUrl);
+    if (parsedUrl.protocol !== 'https:') {
+      return jsonResponse({ ok: false, items: [], error: 'Invalid media service URL.' }, 500);
+    }
+    supabaseOrigin = parsedUrl.origin;
+  } catch {
+    return jsonResponse({ ok: false, items: [], error: 'Invalid media service URL.' }, 500);
+  }
+
+  const requestUrl = new URL(request.url);
+  const requestedSection = requestUrl.searchParams.get('section')?.trim() || '';
+  if (requestedSection && !VALID_MEDIA_SECTIONS.has(requestedSection as MediaSection)) {
+    return jsonResponse({ ok: false, items: [], error: 'Invalid media section filter.' }, 400);
+  }
+
+  const queryParams = new URLSearchParams({
+    select: 'id,section,slot,storage_path,title,alt_text,metadata,display_order,created_at',
+    is_published: 'eq.true',
+    order: 'display_order.asc,created_at.desc',
+  });
+
+  if (requestedSection) {
+    queryParams.set('section', `eq.${requestedSection}`);
+  }
+
+  const headers: Record<string, string> = {
+    apikey: publishableKey,
+    Accept: 'application/json',
+  };
+
+  // Support both modern Supabase `sb_publishable_*` keys (apikey header only)
+  // and legacy JWT `anon` keys (apikey + Authorization Bearer).
+  if (isLegacyJwtKey(publishableKey)) {
+    headers.Authorization = `Bearer ${publishableKey}`;
+  }
+
+  try {
+    const supabaseRes = await fetch(`${supabaseOrigin}/rest/v1/website_media?${queryParams.toString()}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!supabaseRes.ok) {
+      console.error(`Supabase media query failed with status ${supabaseRes.status}`);
+      return jsonResponse(
+        { ok: false, items: [], error: 'Unable to load published media right now.' },
+        502
+      );
+    }
+
+    const rawRows = (await supabaseRes.json().catch(() => null)) as unknown;
+    if (!Array.isArray(rawRows)) {
+      return jsonResponse({ ok: true, items: [] }, 200, {
+        'Cache-Control': 'public, max-age=60, s-maxage=60',
+      });
+    }
+
+    const items: PublicMediaItem[] = [];
+
+    for (const rawRow of rawRows) {
+      if (!rawRow || typeof rawRow !== 'object') continue;
+      const row = rawRow as SupabaseMediaRow;
+
+      if (typeof row.id !== 'string' || typeof row.section !== 'string' || typeof row.storage_path !== 'string') {
+        continue;
+      }
+
+      if (!VALID_MEDIA_SECTIONS.has(row.section as MediaSection)) {
+        continue;
+      }
+
+      const imageUrl = buildPublicStorageUrl(supabaseOrigin, row.storage_path);
+      if (!imageUrl) {
+        continue;
+      }
+
+      const title = typeof row.title === 'string' && row.title.trim().length > 0 ? row.title.trim() : '';
+      if (!title) {
+        continue;
+      }
+
+      const altText =
+        typeof row.alt_text === 'string' && row.alt_text.trim().length > 0 ? row.alt_text.trim() : title;
+      const slot = typeof row.slot === 'string' && row.slot.trim().length > 0 ? row.slot.trim() : null;
+      const displayOrder = typeof row.display_order === 'number' && Number.isFinite(row.display_order) ? row.display_order : 0;
+
+      const meta =
+        row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+          ? (row.metadata as Record<string, unknown>)
+          : {};
+
+      const item: PublicMediaItem = {
+        id: row.id,
+        section: row.section as MediaSection,
+        slot,
+        title,
+        altText,
+        imageUrl,
+        displayOrder,
+      };
+
+      const rawCategory =
+        typeof meta.category === 'string' && VALID_GALLERY_CATEGORIES.has(meta.category)
+          ? (meta.category as 'processing-line' | 'equipment' | 'installation')
+          : slot && VALID_GALLERY_CATEGORIES.has(slot)
+            ? (slot as 'processing-line' | 'equipment' | 'installation')
+            : undefined;
+      if (rawCategory) {
+        item.category = rawCategory;
+      }
+
+      if (typeof meta.location === 'string' && meta.location.trim()) {
+        item.location = meta.location.trim();
+      }
+
+      if (typeof meta.speed === 'string' && meta.speed.trim()) {
+        item.speed = meta.speed.trim();
+      }
+
+      if (typeof row.created_at === 'string' && row.created_at.length >= 10) {
+        item.uploadedAt = row.created_at.slice(0, 10);
+      }
+
+      items.push(item);
+    }
+
+    return jsonResponse(
+      { ok: true, items },
+      200,
+      { 'Cache-Control': 'public, max-age=60, s-maxage=60' }
+    );
+  } catch {
+    console.error('Supabase media network request failed');
+    return jsonResponse(
+      { ok: false, items: [], error: 'Unable to reach the published media service.' },
+      502
+    );
+  }
 }
 
 function validateEnquiry(payload: EnquiryPayload): {
@@ -325,6 +548,13 @@ async function handleEnquiryPost(request: Request, env: Env): Promise<Response> 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === '/api/media') {
+      if (request.method !== 'GET') {
+        return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405, { Allow: 'GET' });
+      }
+      return handleMediaGet(request, env);
+    }
 
     if (url.pathname === '/api/enquiry/config') {
       if (request.method !== 'GET') {

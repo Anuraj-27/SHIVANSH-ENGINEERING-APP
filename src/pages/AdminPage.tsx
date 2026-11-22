@@ -422,10 +422,10 @@ export const AdminPage: React.FC = () => {
               </span>
             </div>
             <h1 className="font-display font-normal text-3xl sm:text-4xl text-ink tracking-normal">
-              Website Media Upload Console
+              Website Media Console (Browser-Only Local Controls)
             </h1>
             <p className="text-sm text-ink mt-1">
-              Manage dynamic media across Landing Page Elevated Showcase, Gallery, Processing Lines, and Equipments.
+              Changes made here are saved in this browser only and are not published live. Public site media is served read-only from Supabase (website_media / website-media).
             </p>
           </div>
 
@@ -448,11 +448,20 @@ export const AdminPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Phase 1 Browser-Only Storage Notice */}
+        <div className="mb-6 p-4 rounded-2xl bg-terracotta/12 border border-terracotta text-ink text-sm flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-terracotta shrink-0 mt-0.5" />
+          <div>
+            <strong className="font-semibold">Browser-Only Controls (Phase 1):</strong>{' '}
+            Public visitors now see published media loaded from Supabase. Uploads, reorders, and removals below save only to this browser&apos;s local storage and do not publish to live visitors. To publish live images in Phase 1, upload files to the <code className="font-semibold">website-media</code> bucket and insert a published row into <code className="font-semibold">website_media</code> in the Supabase Dashboard.
+          </div>
+        </div>
+
         {/* Global Success Notification */}
         {successMsg && (
           <div className="mb-6 p-4 rounded-2xl bg-ivory border border-sage text-ink text-sm font-medium flex items-center gap-3">
             <CheckCircle2 className="w-5 h-5 text-sage shrink-0" />
-            <span>{successMsg}</span>
+            <span>{successMsg} (Saved in this browser only — not published live.)</span>
           </div>
         )}
 
@@ -670,7 +679,7 @@ export const AdminPage: React.FC = () => {
                       className="w-full py-3.5 px-6 rounded-xl bg-ink hover:bg-ink-hover disabled:opacity-50 text-ivory font-semibold text-sm shadow-soft-diffused transition-colors duration-150 flex items-center justify-center gap-2"
                     >
                       <Plus className="w-4 h-4 text-ivory" />
-                      <span>{isProcessing ? 'Processing Image...' : 'Publish to Landing Showcase Box'}</span>
+                      <span>{isProcessing ? 'Processing Image...' : 'Save to Browser Only (Not Live)'}</span>
                     </button>
                   </div>
                 </div>
@@ -893,7 +902,7 @@ export const AdminPage: React.FC = () => {
                       className="w-full py-3.5 px-6 rounded-xl bg-ink hover:bg-ink-hover disabled:opacity-50 text-ivory font-semibold text-sm shadow-soft-diffused transition-colors duration-150 flex items-center justify-center gap-2"
                     >
                       <Plus className="w-4 h-4" />
-                      <span>{isProcessing ? 'Processing Image...' : 'Publish Photo to Gallery'}</span>
+                      <span>{isProcessing ? 'Processing Image...' : 'Save Photo to Browser Only (Not Live)'}</span>
                     </button>
                   </div>
                 </div>
@@ -1086,7 +1095,7 @@ export const AdminPage: React.FC = () => {
                           onClick={handleSaveProcessingLinePhoto}
                           className="flex-1 py-2.5 px-4 bg-ink hover:bg-ink-hover text-ivory font-semibold text-xs rounded-xl transition-colors duration-150"
                         >
-                          Save Photo to Live Line
+                          Save Photo to Browser Only (Not Live)
                         </button>
                         <button
                           type="button"
@@ -1231,7 +1240,7 @@ export const AdminPage: React.FC = () => {
                           onClick={handleSaveEquipmentPhoto}
                           className="flex-1 py-2.5 px-4 bg-ink hover:bg-ink-hover text-ivory font-semibold text-xs rounded-xl transition-colors duration-150"
                         >
-                          Save Photo
+                          Save Photo to Browser Only (Not Live)
                         </button>
                         <button
                           type="button"

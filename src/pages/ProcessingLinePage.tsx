@@ -2,9 +2,11 @@ import React from 'react';
 import { Layers, ArrowRight } from 'lucide-react';
 import { useRouter } from '../router/Router';
 import { PROCESSING_LINES } from '../data/processingLinesData';
+import { usePublishedMedia, getPublishedProcessingLineImage } from '../services/publishedMedia';
 
 export const ProcessingLinePage: React.FC = () => {
   const { navigate } = useRouter();
+  const { items: publishedMedia } = usePublishedMedia();
 
   return (
     <div className="bg-canvas min-h-[80vh] py-16 border-b border-border relative font-sans">
@@ -38,27 +40,38 @@ export const ProcessingLinePage: React.FC = () => {
 
         {/* 12 Processing Lines Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16">
-          {PROCESSING_LINES.map((line) => (
-            <div
-              key={line.id}
-              onClick={() => navigate(`/products/processing-line/${line.slug}`)}
-              className="bg-ivory rounded-2xl border border-border p-6 shadow-soft-diffused hover:border-sage hover:shadow-card-elevated transition-[border-color,box-shadow] duration-200 flex flex-col justify-between group cursor-pointer"
-            >
-              <div>
-                <div className="flex items-center justify-between text-xs font-sans mb-3">
-                  <span className="font-semibold uppercase tracking-[0.1em] text-ink flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-terracotta" />
-                    {line.slug.toUpperCase()}
-                  </span>
-                </div>
+          {PROCESSING_LINES.map((line) => {
+            const publishedPhoto = getPublishedProcessingLineImage(publishedMedia, line.slug);
+            const imageSrc = publishedPhoto?.imageUrl || line.image;
+            const imageAlt = publishedPhoto?.altText || line.imageAlt;
 
-                <div className="rounded-xl overflow-hidden mb-4 border border-border bg-canvas aspect-[16/10]">
-                  <img
-                    src={line.image}
-                    alt={line.imageAlt}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
+            return (
+              <div
+                key={line.id}
+                onClick={() => navigate(`/products/processing-line/${line.slug}`)}
+                className="bg-ivory rounded-2xl border border-border p-6 shadow-soft-diffused hover:border-sage hover:shadow-card-elevated transition-[border-color,box-shadow] duration-200 flex flex-col justify-between group cursor-pointer"
+              >
+                <div>
+                  <div className="flex items-center justify-between text-xs font-sans mb-3">
+                    <span className="font-semibold uppercase tracking-[0.1em] text-ink flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-terracotta" />
+                      {line.slug.toUpperCase()}
+                    </span>
+                  </div>
+
+                  <div className="rounded-xl overflow-hidden mb-4 border border-border bg-canvas aspect-[16/10]">
+                    <img
+                      src={imageSrc}
+                      alt={imageAlt}
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (target.src !== window.location.origin + line.image) {
+                          target.src = line.image;
+                        }
+                      }}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
 
                 {/* Product Title */}
                 <h3 className="text-base sm:text-lg font-semibold text-ink leading-snug font-sans">
@@ -87,7 +100,8 @@ export const ProcessingLinePage: React.FC = () => {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Technical Consultation Action */}
