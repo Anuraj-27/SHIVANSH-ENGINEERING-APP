@@ -44,7 +44,7 @@ export const HomePage: React.FC = () => {
     <div className="w-full overflow-x-clip bg-canvas font-sans">
       {/* Full-Width Edge-to-Edge Hero Section */}
       <section
-        aria-label="Rolling Mill and Strip Processing Equipment"
+        aria-label="Steel Processing Lines and Terminal Equipments"
         className="relative w-full bg-ink overflow-hidden"
       >
         {/* Mobile Top Photo Panel (prevents text from covering the machinery on narrow screens) */}
@@ -94,8 +94,8 @@ export const HomePage: React.FC = () => {
           <div className="relative z-10 w-full max-w-7xl mx-auto px-5 sm:px-6 lg:px-8 py-9 sm:py-12 md:py-16">
             <div className="max-w-[540px] lg:max-w-[580px]">
               <h1 className="font-display font-normal text-[34px] sm:text-[42px] md:text-[48px] lg:text-[54px] text-ivory tracking-normal leading-[1.1] text-balance">
-                Rolling Mill &amp; Strip
-                <br className="hidden sm:inline" /> Processing Equipment
+                Steel Processing Lines
+                <br className="hidden sm:inline" /> and Terminal Equipments
               </h1>
 
               {/* Crisp Terracotta Decorative Accent Rule */}

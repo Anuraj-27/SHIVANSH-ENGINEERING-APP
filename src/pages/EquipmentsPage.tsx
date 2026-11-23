@@ -1,5 +1,5 @@
-import React from 'react';
-import { Cog, ArrowRight, Eye } from 'lucide-react';
+import React, { useState } from 'react';
+import { Cog, ArrowRight } from 'lucide-react';
 import { useRouter } from '../router/Router';
 import { usePublishedMedia, getPublishedEquipmentImage } from '../services/publishedMedia';
 
@@ -38,6 +38,11 @@ export const EQUIPMENTS_LIST = [
 export const EquipmentsPage: React.FC = () => {
   const { navigate } = useRouter();
   const { items: publishedMedia } = usePublishedMedia();
+  const [failedImageUrls, setFailedImageUrls] = useState<Record<string, boolean>>({});
+
+  const handleImageError = (imageUrl: string) => {
+    setFailedImageUrls((prev) => (prev[imageUrl] ? prev : { ...prev, [imageUrl]: true }));
+  };
 
   return (
     <div className="bg-canvas min-h-[80vh] py-16 border-b border-border relative font-sans">
@@ -73,33 +78,40 @@ export const EquipmentsPage: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5 mb-16">
           {EQUIPMENTS_LIST.map((name, idx) => {
             const publishedPhoto = getPublishedEquipmentImage(publishedMedia, name);
+            const showPhoto = Boolean(publishedPhoto && !failedImageUrls[publishedPhoto.imageUrl]);
+            const imageAlt = publishedPhoto?.altText?.trim() || name;
+
             return (
-              <div
+              <article
                 key={idx}
-                onClick={() => navigate('/contact')}
-                className="bg-ivory rounded-2xl border border-border p-5 min-h-[125px] flex flex-col items-center justify-center text-center shadow-soft-diffused hover:shadow-card-elevated hover:border-sage transition-[border-color,box-shadow] duration-200 cursor-pointer group relative overflow-hidden"
+                className="bg-ivory rounded-2xl border border-border p-4 sm:p-5 flex flex-col text-center shadow-soft-diffused overflow-hidden"
               >
-                <div className="absolute top-2.5 right-3 text-[11px] font-sans font-medium tabular-nums text-ink/70">
-                  #{String(idx + 1).padStart(2, '0')}
+                <div className="flex items-center justify-end mb-2">
+                  <span className="text-[11px] font-sans font-medium tabular-nums text-ink/70">
+                    #{String(idx + 1).padStart(2, '0')}
+                  </span>
                 </div>
 
-                {publishedPhoto ? (
-                  <div className="w-full aspect-[16/10] rounded-xl overflow-hidden mb-3 border border-border bg-canvas relative">
+                <div className="w-full aspect-[4/3] rounded-xl border border-border bg-canvas p-2.5 sm:p-3 flex items-center justify-center overflow-hidden mb-3.5">
+                  {showPhoto && publishedPhoto ? (
                     <img
                       src={publishedPhoto.imageUrl}
-                      alt={publishedPhoto.altText}
-                      className="w-full h-full object-cover"
+                      alt={imageAlt}
+                      referrerPolicy="no-referrer"
+                      onError={() => handleImageError(publishedPhoto.imageUrl)}
+                      className="w-full h-full object-contain object-center"
                     />
-                    <div className="absolute inset-0 bg-ink/35 opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center justify-center">
-                      <Eye className="w-4 h-4 text-ivory" />
-                    </div>
-                  </div>
-                ) : null}
+                  ) : (
+                    <Cog className="w-8 h-8 text-ink/20" aria-hidden="true" />
+                  )}
+                </div>
 
-                <h3 className="text-sm sm:text-base font-semibold text-ink leading-snug font-sans">
-                  {name}
-                </h3>
-              </div>
+                <div className="flex-1 flex items-center justify-center px-1">
+                  <h3 className="text-sm sm:text-base font-semibold text-ink leading-snug font-sans">
+                    {name}
+                  </h3>
+                </div>
+              </article>
             );
           })}
         </div>
